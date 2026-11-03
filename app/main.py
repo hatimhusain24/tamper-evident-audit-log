@@ -8,6 +8,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.chain import verify_chain
+from app.compliance import access_report
 from app.config import settings
 from app.models import (
     EventIn,
@@ -81,6 +82,16 @@ def create_app(db_path: str = settings.db_path, admin_key: str | None = settings
             raise HTTPException(422, "provide exactly one of actorId or resourceId")
         return store.export("actor_id", actorId) if actorId else \
             store.export("resource_id", resourceId)
+
+    @app.get("/audit/reports/account-access", dependencies=[Depends(require_admin)])
+    def account_access_report(
+        requestedBy: Annotated[str, Query(min_length=1, max_length=128)],
+        accountId: str | None = None,
+        start: Annotated[datetime | None, Query(alias="from")] = None,
+        end: Annotated[datetime | None, Query(alias="to")] = None,
+    ) -> dict:
+        """Scenario C: who accessed client account data, when and why, with integrity proof."""
+        return access_report(store, accountId, start, end, requestedBy)
 
     @app.post("/audit/retention/run", response_model=RetentionResult,
               dependencies=[Depends(require_admin)])
