@@ -2,7 +2,7 @@
 
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from app.chain import ARCHIVE_EVENT, REDACTION_EVENT, canonical
 
@@ -36,6 +36,13 @@ class EventIn(BaseModel):
         if len(canonical(v)) > MAX_PAYLOAD_BYTES:
             raise ValueError(f"payload exceeds {MAX_PAYLOAD_BYTES} bytes")
         return v
+
+
+class RedactionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    fields: Annotated[list[Ident], Field(min_length=1, max_length=50)]
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=500)]
+    requestedBy: Ident
 
 
 class EventOut(BaseModel):

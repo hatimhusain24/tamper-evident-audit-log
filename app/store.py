@@ -15,10 +15,11 @@ from collections.abc import Iterator
 from contextlib import closing
 from datetime import UTC, datetime
 
-from app.chain import GENESIS_HASH, build_record
+from app.chain import ARCHIVE_EVENT, GENESIS_HASH, REDACTED, REDACTION_EVENT, build_record
 
 SCHEMA = """
 PRAGMA journal_mode = WAL;
+PRAGMA secure_delete = ON;  -- redacted bytes are zeroed, not left in free pages
 CREATE TABLE IF NOT EXISTS events (
     seq           INTEGER PRIMARY KEY,
     timestamp     TEXT    NOT NULL,
@@ -52,6 +53,14 @@ JSON_KEYS = {"payload", "salts", "fieldHashes"}
 FILTERS = {"actorId": "actor_id", "resourceType": "resource_type",  # API name -> column
            "resourceId": "resource_id", "eventType": "event_type"}
 SELECT = f"SELECT {', '.join(COLUMNS)} FROM events"  # noqa: S608 - constant columns
+
+
+class NotFound(Exception):
+    pass
+
+
+class Conflict(Exception):
+    pass
 
 
 def iso(dt: datetime) -> str:
@@ -104,6 +113,37 @@ class AuditStore:
 
     def append(self, event: dict) -> dict:
         return self._write(lambda: self._append(event))
+
+    def redact(self, seq: int, fields: list[str], reason: str, requested_by: str) -> dict:
+        """Remove payload values but keep their commitments, so the chain still verifies.
+
+        The redaction is recorded as a chained RECORD_REDACTED event (who/why/what). verify()
+        treats any redacted field without such an event as tampering.
+        """
+        def op():
+            row = self._db.execute(f"{SELECT} WHERE seq = ?", (seq,)).fetchone()
+            if row is None:
+                raise NotFound(f"record {seq} not found")
+            r = to_record(row)
+            if r["archived"] or r["eventType"] in (REDACTION_EVENT, ARCHIVE_EVENT):
+                raise Conflict("archived records and system events cannot be redacted")
+            if unknown := set(fields) - r["payload"].keys():
+                raise Conflict(f"unknown payload fields: {sorted(unknown)}")
+            targets = sorted(f for f in set(fields) if f in r["salts"])
+            if not targets:
+                raise Conflict("fields are already redacted")
+            payload = r["payload"] | dict.fromkeys(targets, REDACTED)
+            salts = {k: v for k, v in r["salts"].items() if k not in targets}
+            self._db.execute("UPDATE events SET payload = ?, salts = ? WHERE seq = ?",
+                             (json.dumps(payload), json.dumps(salts), seq))
+            return self._append({
+                "eventType": REDACTION_EVENT, "actorId": requested_by,
+                "resourceType": "AUDIT_EVENT", "resourceId": str(seq),
+                "payload": {"targetSeq": seq, "fields": targets, "reason": reason}})
+        audit_event = self._write(op)
+        with self._lock:  # flush WAL so the old value is not left in the -wal file
+            self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        return audit_event
 
     # ---- reads --------------------------------------------------------------------------
     def _read(self, sql: str, params=()) -> Iterator[dict]:

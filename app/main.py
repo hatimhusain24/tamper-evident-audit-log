@@ -1,20 +1,35 @@
 """HTTP API. Run with:  uvicorn app.main:create_app --factory"""
 
+import hmac
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import FastAPI, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 
 from app.chain import verify_chain
 from app.config import settings
-from app.models import EventIn, EventOut, EventPage, VerifyResult
-from app.store import AuditStore
+from app.models import EventIn, EventOut, EventPage, RedactionIn, VerifyResult
+from app.store import AuditStore, Conflict, NotFound
 
 
-def create_app(db_path: str = settings.db_path) -> FastAPI:
+def create_app(db_path: str = settings.db_path, admin_key: str | None = settings.admin_key):
     store = AuditStore(db_path)
     app = FastAPI(title="Tamper-Evident Audit Log", version="1.0.0",
                   description="Append-only, hash-chained audit events. No update/delete API.")
+
+    def require_admin(x_admin_key: Annotated[str | None, Header()] = None) -> None:
+        """High-impact operations (redaction, archival) need the admin key when one is set."""
+        if admin_key and not hmac.compare_digest(x_admin_key or "", admin_key):
+            raise HTTPException(401, "valid X-Admin-Key header required")
+
+    @app.exception_handler(NotFound)
+    def not_found(_: Request, exc: NotFound) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=404)
+
+    @app.exception_handler(Conflict)
+    def conflict(_: Request, exc: Conflict) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=409)
 
     @app.get("/health")
     def health() -> dict:
@@ -43,5 +58,11 @@ def create_app(db_path: str = settings.db_path) -> FastAPI:
     @app.get("/audit/verify", response_model=VerifyResult)
     def verify() -> dict:
         return verify_chain(store.iter_chain())
+
+    @app.post("/audit/events/{seq}/redactions", status_code=201, response_model=EventOut,
+              dependencies=[Depends(require_admin)])
+    def redact(seq: int, body: RedactionIn) -> dict:
+        """Redact payload fields of one record. Returns the chained RECORD_REDACTED event."""
+        return store.redact(seq, body.fields, body.reason, body.requestedBy)
 
     return app
