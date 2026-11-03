@@ -121,3 +121,36 @@ def verify_chain(records: Iterable[dict]) -> dict:
             "UNAUTHORIZED_ARCHIVE", f"records up to seq {last_archived} purged, "
                                     f"policy authorized only up to {archived_through}"))
     return _result(True, checked, prev)
+
+
+def verify_bundle(bundle: dict) -> dict:
+    """Independently verify an export bundle (no database or service needed).
+
+    Proves that (1) every exported record matches its own hash and payload commitments,
+    (2) each record hash sits at its seq in a contiguous chain segment that runs to the head
+    at export time. Comparing `headHash` with a trusted checkpoint (e.g. a published anchor or
+    a later GET /audit/verify) then proves the records were not altered since export.
+    """
+    links, records = bundle["chain"], bundle["records"]
+
+    def fail(seq, violation, detail):
+        return {"valid": False, "recordsVerified": 0, "headSeq": bundle["head"]["seq"],
+                "headHash": bundle["head"]["hash"], "firstInvalidSeq": seq,
+                "violation": violation, "detail": detail}
+
+    for prev, cur in zip(links, links[1:], strict=False):
+        if cur["seq"] != prev["seq"] + 1 or cur["prevHash"] != prev["hash"]:
+            return fail(cur["seq"], "CHAIN_LINK_BROKEN", "chain segment is not contiguous")
+    if links and (links[-1]["seq"], links[-1]["hash"]) != (bundle["head"]["seq"],
+                                                          bundle["head"]["hash"]):
+        return fail(links[-1]["seq"], "HEAD_MISMATCH", "segment does not end at the stated head")
+    by_seq = {link["seq"]: link for link in links}
+    for r in records:
+        link = by_seq.get(r["seq"])
+        if link is None or link["hash"] != r["hash"]:
+            return fail(r["seq"], "NOT_IN_CHAIN", "record hash is not in the chain segment")
+        if v := check_record(r, link["prevHash"], r["seq"]):
+            return fail(r["seq"], *v)
+    return {"valid": True, "recordsVerified": len(records), "headSeq": bundle["head"]["seq"],
+            "headHash": bundle["head"]["hash"], "firstInvalidSeq": None,
+            "violation": None, "detail": None}

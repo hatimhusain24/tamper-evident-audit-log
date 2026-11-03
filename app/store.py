@@ -201,5 +201,26 @@ class AuditStore:
         page = rows[:limit]
         return page, (page[-1]["seq"] if len(rows) > limit else None)
 
+    def export(self, column: str, value: str) -> dict:
+        """Self-verifiable bundle: matching records plus the chain skeleton up to the head.
+
+        One streaming pass from the first matching record. The skeleton (seq, prevHash, hash)
+        holds no event content, so it is safe to share.
+        """
+        with closing(sqlite3.connect(self.path)) as conn:
+            first = conn.execute(f"SELECT MIN(seq) FROM events "  # noqa: S608 - whitelisted column
+                                 f"WHERE archived = 0 AND {column} = ?", (value,)).fetchone()[0]
+            records, links = [], []
+            for row in conn.execute(f"{SELECT} WHERE seq >= ? ORDER BY seq", (first or -1,)):
+                r = to_record(row)
+                links.append({k: r[k] for k in ("seq", "prevHash", "hash")})
+                if not r["archived"] and r[KEYS[COLUMNS.index(column)]] == value:
+                    records.append({k: v for k, v in r.items() if k != "archived"})
+            head = conn.execute("SELECT seq, hash FROM events ORDER BY seq DESC LIMIT 1").fetchone()
+        return {"format": "audit-bundle/v1", "exportedAt": iso(datetime.now(UTC)),
+                "algorithm": "sha256; record/field hashing as specified in app/chain.py",
+                "records": records, "chain": links,
+                "head": {"seq": head[0], "hash": head[1]} if head else {"seq": 0, "hash": None}}
+
     def iter_chain(self, from_seq: int = 1) -> Iterator[dict]:
         return self._read(f"{SELECT} WHERE seq >= ? ORDER BY seq", (from_seq,))

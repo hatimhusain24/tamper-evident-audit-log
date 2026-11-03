@@ -74,6 +74,14 @@ def create_app(db_path: str = settings.db_path, admin_key: str | None = settings
         """Redact payload fields of one record. Returns the chained RECORD_REDACTED event."""
         return store.redact(seq, body.fields, body.reason, body.requestedBy)
 
+    @app.get("/audit/export")
+    def export(actorId: str | None = None, resourceId: str | None = None) -> dict:
+        """Export all records for ONE actorId or resourceId as a verifiable bundle."""
+        if (actorId is None) == (resourceId is None):
+            raise HTTPException(422, "provide exactly one of actorId or resourceId")
+        return store.export("actor_id", actorId) if actorId else \
+            store.export("resource_id", resourceId)
+
     @app.post("/audit/retention/run", response_model=RetentionResult,
               dependencies=[Depends(require_admin)])
     def run_retention(body: RetentionIn | None = None) -> dict:
