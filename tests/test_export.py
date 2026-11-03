@@ -28,7 +28,7 @@ def test_export_by_resource_and_empty_result(client, bundle):
     by_resource = client.get("/audit/export", params={"resourceId": "acc-0"}).json()
     assert [r["seq"] for r in by_resource["records"]] == [3, 6]
     empty = client.get("/audit/export", params={"actorId": "nobody"}).json()
-    assert empty["records"] == [] and verify_bundle(empty)["valid"]
+    assert empty["records"] == [] and empty["chain"] == [] and verify_bundle(empty)["valid"]
 
 
 @pytest.mark.parametrize("params", [{}, {"actorId": "a", "resourceId": "b"}])

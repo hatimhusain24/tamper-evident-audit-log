@@ -211,7 +211,8 @@ class AuditStore:
             first = conn.execute(f"SELECT MIN(seq) FROM events "  # noqa: S608 - whitelisted column
                                  f"WHERE archived = 0 AND {column} = ?", (value,)).fetchone()[0]
             records, links = [], []
-            for row in conn.execute(f"{SELECT} WHERE seq >= ? ORDER BY seq", (first or -1,)):
+            rows = conn.execute(f"{SELECT} WHERE seq >= ? ORDER BY seq", (first,)) if first else []
+            for row in rows:
                 r = to_record(row)
                 links.append({k: r[k] for k in ("seq", "prevHash", "hash")})
                 if not r["archived"] and r[KEYS[COLUMNS.index(column)]] == value:

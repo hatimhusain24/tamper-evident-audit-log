@@ -80,8 +80,8 @@ def create_app(db_path: str = settings.db_path, admin_key: str | None = settings
         """Export all records for ONE actorId or resourceId as a verifiable bundle."""
         if (actorId is None) == (resourceId is None):
             raise HTTPException(422, "provide exactly one of actorId or resourceId")
-        return store.export("actor_id", actorId) if actorId else \
-            store.export("resource_id", resourceId)
+        column, value = ("actor_id", actorId) if actorId else ("resource_id", resourceId)
+        return store.export(column, value)
 
     @app.get("/audit/reports/account-access", dependencies=[Depends(require_admin)])
     def account_access_report(
