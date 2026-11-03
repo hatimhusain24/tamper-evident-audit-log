@@ -72,8 +72,8 @@ class EventPage(BaseModel):
 class VerifyResult(BaseModel):
     valid: bool
     recordsChecked: int
-    headSeq: int
-    headHash: str  # anchor this value externally to detect truncation or full rewrites
+    headSeq: int   # on failure: the last record that verified
+    headHash: str  # last verified record; anchor externally to detect truncation/rewrites
     firstInvalidSeq: int | None
     violation: str | None
     detail: str | None
