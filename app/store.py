@@ -13,7 +13,7 @@ import sqlite3
 import threading
 from collections.abc import Iterator
 from contextlib import closing
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from app.chain import ARCHIVE_EVENT, GENESIS_HASH, REDACTED, REDACTION_EVENT, build_record
 
@@ -144,6 +144,34 @@ class AuditStore:
         with self._lock:  # flush WAL so the old value is not left in the -wal file
             self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         return audit_event
+
+    def archive(self, older_than_days: float, requested_by: str) -> dict:
+        """Retention: turn records older than the window into tombstones.
+
+        A tombstone keeps seq/timestamp/prevHash/hash, so chain links still verify. Content is
+        purged. Timestamps are monotonic, so "older than cutoff" is always a contiguous prefix.
+        The run is authorized by a chained RECORDS_ARCHIVED event; verify flags tombstones
+        beyond its throughSeq.
+        """
+        cutoff = iso(datetime.now(UTC) - timedelta(days=older_than_days))
+
+        def op():
+            through, count = self._db.execute(
+                "SELECT MAX(seq), SUM(archived = 0) FROM events WHERE timestamp < ?",
+                (cutoff,)).fetchone()
+            if not count:
+                return {"archivedCount": 0, "throughSeq": through, "event": None}
+            self._db.execute(
+                "UPDATE events SET archived = 1, event_type = NULL, actor_id = NULL, "
+                "resource_type = NULL, resource_id = NULL, payload = NULL, salts = NULL, "
+                "field_hashes = NULL WHERE seq <= ? AND archived = 0", (through,))
+            event = self._append({
+                "eventType": ARCHIVE_EVENT, "actorId": requested_by,
+                "resourceType": "AUDIT_LOG", "resourceId": "retention",
+                "payload": {"throughSeq": through, "cutoff": cutoff, "count": count,
+                            "olderThanDays": older_than_days}})
+            return {"archivedCount": count, "throughSeq": through, "event": event}
+        return self._write(op)
 
     # ---- reads --------------------------------------------------------------------------
     def _read(self, sql: str, params=()) -> Iterator[dict]:

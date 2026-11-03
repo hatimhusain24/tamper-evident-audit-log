@@ -45,6 +45,12 @@ class RedactionIn(BaseModel):
     requestedBy: Ident
 
 
+class RetentionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    olderThanDays: Annotated[float | None, Field(ge=0)] = None  # default: AUDIT_RETENTION_DAYS
+    requestedBy: Ident = "system:retention"
+
+
 class EventOut(BaseModel):
     seq: int
     timestamp: str
@@ -71,3 +77,9 @@ class VerifyResult(BaseModel):
     firstInvalidSeq: int | None
     violation: str | None
     detail: str | None
+
+
+class RetentionResult(BaseModel):
+    archivedCount: int
+    throughSeq: int | None
+    event: EventOut | None  # the chained RECORDS_ARCHIVED event that authorizes this run

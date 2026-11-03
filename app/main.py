@@ -9,11 +9,20 @@ from fastapi.responses import JSONResponse
 
 from app.chain import verify_chain
 from app.config import settings
-from app.models import EventIn, EventOut, EventPage, RedactionIn, VerifyResult
+from app.models import (
+    EventIn,
+    EventOut,
+    EventPage,
+    RedactionIn,
+    RetentionIn,
+    RetentionResult,
+    VerifyResult,
+)
 from app.store import AuditStore, Conflict, NotFound
 
 
-def create_app(db_path: str = settings.db_path, admin_key: str | None = settings.admin_key):
+def create_app(db_path: str = settings.db_path, admin_key: str | None = settings.admin_key,
+               retention_days: float = settings.retention_days) -> FastAPI:
     store = AuditStore(db_path)
     app = FastAPI(title="Tamper-Evident Audit Log", version="1.0.0",
                   description="Append-only, hash-chained audit events. No update/delete API.")
@@ -64,5 +73,13 @@ def create_app(db_path: str = settings.db_path, admin_key: str | None = settings
     def redact(seq: int, body: RedactionIn) -> dict:
         """Redact payload fields of one record. Returns the chained RECORD_REDACTED event."""
         return store.redact(seq, body.fields, body.reason, body.requestedBy)
+
+    @app.post("/audit/retention/run", response_model=RetentionResult,
+              dependencies=[Depends(require_admin)])
+    def run_retention(body: RetentionIn | None = None) -> dict:
+        """Archive (tombstone) records older than the retention window."""
+        body = body or RetentionIn()
+        days = retention_days if body.olderThanDays is None else body.olderThanDays
+        return store.archive(days, body.requestedBy)
 
     return app
