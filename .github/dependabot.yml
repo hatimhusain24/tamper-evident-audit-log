@@ -1,0 +1,9 @@
+# Dependency vulnerability scanning (SCA): weekly PRs for vulnerable or outdated dependencies
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }

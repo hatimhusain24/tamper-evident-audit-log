@@ -192,6 +192,6 @@ class ScenarioAApiTest extends ApiTestBase {
 
     @Test
     void healthEndpoint() throws Exception {
-        assertThat(get("/health").<String>get("status")).isEqualTo("ok");
+        assertThat(get("/actuator/health").<String>get("status")).isEqualTo("UP");   // includes a DB check
     }
 }

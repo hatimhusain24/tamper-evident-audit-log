@@ -88,9 +88,32 @@ class SecurityTest extends ApiTestBase {
     }
 
     @Test
-    void healthIsPublicAndUnknownPathsAreDenied() throws Exception {
-        assertThat(callAs(null, MockMvcRequestBuilders.get("/health")).status()).isEqualTo(200);
+    void healthIsPublicWithoutDetailsAndUnknownPathsAreDenied() throws Exception {
+        Response health = callAs(null, MockMvcRequestBuilders.get("/actuator/health"));
+        assertThat(health.status()).isEqualTo(200);
+        assertThat(health.<String>get("status")).isEqualTo("UP");
+        assertThat(health.body()).doesNotContainKey("components");          // no internals leaked
         assertThat(callAs("admin", MockMvcRequestBuilders.get("/anything-else")).status()).isEqualTo(403);
+    }
+
+    @Test
+    void metricsAreAdminOnly() throws Exception {
+        assertThat(callAs("reader", MockMvcRequestBuilders.get("/actuator/metrics")).status()).isEqualTo(403);
+        assertThat(callAs("admin", MockMvcRequestBuilders.get("/actuator/metrics")).status()).isEqualTo(200);
+    }
+
+    @Test
+    void swaggerIsOffByDefault() throws Exception {
+        assertThat(callAs(null, MockMvcRequestBuilders.get("/v3/api-docs")).status()).isEqualTo(404);
+    }
+
+    @Test
+    void tamperDetectionIsCountedForAlerting() throws Exception {
+        seed(2);
+        tamper("UPDATE events SET actor_id = 'x' WHERE seq = 1");
+        verify();
+        Response m = callAs("admin", MockMvcRequestBuilders.get("/actuator/metrics/audit.verify.failures"));
+        assertThat(m.status()).isEqualTo(200);
     }
 
     @Test
@@ -151,7 +174,7 @@ class SecurityTest extends ApiTestBase {
 
     @Test
     void securityHeadersArePresent() throws Exception {
-        var response = mvc.perform(MockMvcRequestBuilders.get("/health")).andReturn().getResponse();
+        var response = mvc.perform(MockMvcRequestBuilders.get("/actuator/health")).andReturn().getResponse();
         assertThat(response.getHeader("X-Content-Type-Options")).isEqualTo("nosniff");
         assertThat(response.getHeader("X-Frame-Options")).isEqualTo("DENY");
         assertThat(response.getHeader("Cache-Control")).contains("no-store");

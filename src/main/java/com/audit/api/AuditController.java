@@ -12,6 +12,8 @@ import com.audit.chain.VerifyResult;
 import com.audit.compliance.AccessReport;
 import com.audit.compliance.AccessReportService;
 import com.audit.store.AuditStore;
+import com.audit.security.LogSafe;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -20,6 +22,8 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -44,13 +48,15 @@ import org.springframework.web.server.ResponseStatusException;
 public final class AuditController {
 
     static final int MAX_PAYLOAD_BYTES = 32 * 1024;
+    private static final Logger SECURITY_LOG = LoggerFactory.getLogger("audit.security");
 
     private final AuditStore store;
     private final AccessReportService reports;
     private final double retentionDays;
     private final Set<String> sensitiveFields;
+    private final MeterRegistry metrics;
 
-    public AuditController(AuditStore store, AccessReportService reports,
+    public AuditController(AuditStore store, AccessReportService reports, MeterRegistry metrics,
                            @Value("${audit.retention-days:2190}") double retentionDays,
                            @Value("${audit.sensitive-fields:}") Set<String> sensitiveFields) {
         if (retentionDays < store.retentionMinDays()) {   // fail fast on an unsafe deployment
@@ -61,6 +67,7 @@ public final class AuditController {
         this.reports = reports;
         this.retentionDays = retentionDays;
         this.sensitiveFields = Set.copyOf(sensitiveFields);
+        this.metrics = metrics;
     }
 
     /** READERs see sensitive payload fields masked; COMPLIANCE and ADMIN see them in full. */
@@ -68,11 +75,6 @@ public final class AuditController {
         boolean privileged = auth.getAuthorities().stream().anyMatch(a ->
                 a.getAuthority().equals("ROLE_COMPLIANCE") || a.getAuthority().equals("ROLE_ADMIN"));
         return privileged ? Set.of() : sensitiveFields;
-    }
-
-    @GetMapping("/health")
-    public Map<String, String> health() {
-        return Map.of("status", "ok");
     }
 
     @PostMapping(value = "/audit/events", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -86,8 +88,10 @@ public final class AuditController {
         if (HashChain.canonical(payload).length > MAX_PAYLOAD_BYTES) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "payload exceeds " + MAX_PAYLOAD_BYTES + " bytes");
         }
-        return EventView.of(store.append(event.eventType(), event.actorId(), auth.getName(),
+        EventView written = EventView.of(store.append(event.eventType(), event.actorId(), auth.getName(),
                 event.resourceType(), event.resourceId(), payload));
+        metrics.counter("audit.events.written").increment();
+        return written;
     }
 
     @GetMapping("/audit/events")
@@ -122,13 +126,22 @@ public final class AuditController {
         if ((anchorSeq == null) != (anchorHash == null)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "give both anchorSeq and anchorHash, or neither");
         }
-        return store.verify(anchorSeq, anchorHash);
+        VerifyResult result = store.verify(anchorSeq, anchorHash);
+        if (!result.valid()) {   // tamper evidence: alert-worthy
+            metrics.counter("audit.verify.failures", "violation", result.violation()).increment();
+            SECURITY_LOG.error("chain verification failed violation={} seq={} detail={}",
+                    result.violation(), result.firstInvalidSeq(), result.detail());
+        }
+        return result;
     }
 
     @PostMapping(value = "/audit/events/{seq}/redactions", consumes = MediaType.APPLICATION_JSON_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
     public EventView redact(@PathVariable long seq, @Valid @RequestBody RedactionRequest body, Authentication auth) {
-        return EventView.of(store.redact(seq, body.fields(), body.reason(), auth.getName()));
+        EventView event = EventView.of(store.redact(seq, body.fields(), body.reason(), auth.getName()));
+        SECURITY_LOG.info("redaction seq={} fields={} by={}", seq, LogSafe.clean(String.valueOf(body.fields())),
+                LogSafe.clean(auth.getName()));
+        return event;
     }
 
     @PostMapping(value = "/audit/retention/run", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -136,6 +149,8 @@ public final class AuditController {
                                           Authentication auth) {
         double days = body == null || body.olderThanDays() == null ? retentionDays : body.olderThanDays();
         AuditStore.RetentionResult result = store.archive(days, auth.getName());
+        SECURITY_LOG.info("retention run olderThanDays={} archived={} by={}", days, result.archivedCount(),
+                LogSafe.clean(auth.getName()));
         return new RetentionResponse(result.archivedCount(), result.throughSeq(), EventView.of(result.event()));
     }
 
