@@ -4,10 +4,10 @@
 
 ## 1. Clarification process
 
-I broke the sentence into its nouns and verbs and asked what each one has to mean for the
+The sentence was broken into its nouns and verbs, asking what each one has to mean for the
 system to be buildable and testable:
 
-| Phrase | Ambiguity | Question I'd ask Product / Compliance | Working assumption |
+| Phrase | Ambiguity | Question for Product / Compliance | Working assumption |
 |---|---|---|---|
 | "Regulators" | Direct system access for SEC/FINRA examiners, or reports produced *for* them? | Do examiners log in, or does Compliance hand them evidence? | **Compliance generates evidence for examiners.** No external login (avoids a new trust boundary). |
 | "audit" | A one-off report, a continuous feed, or alerting? | Is this for periodic exams, or real-time surveillance? | **On-demand, reproducible report** for a period. Surveillance and alerting are out of scope. |
@@ -71,5 +71,5 @@ COMPLIANCE. It is a POST because generating a report writes a chained event.
 | Admin-gated generation, audited | Entitlement checks ("was the actor *allowed*?"): needs the HR/IAM source of truth. Exceptions approximate this through missing purpose |
 | | WORM storage and 6-year retention enforcement: infrastructure and config |
 
-Verification is O(n) per report. At scale, I'd verify incrementally from a signed checkpoint
+Verification is O(n) per report. At scale, verification would run incrementally from a signed checkpoint
 (see the architecture doc).

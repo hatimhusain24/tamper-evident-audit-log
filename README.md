@@ -1,24 +1,26 @@
 # Tamper-Evident Audit Log Service
 
-An append-only audit log. Every record is hash-chained and MAC-signed, so changing, deleting,
-re-ordering, inserting or rewriting history in the data store is **detected** by
+An append-only audit log. Every record is hash-chained and MAC-signed, the head is checkpointed
+with a signature, and sensitive fields are encrypted at rest. Changing, deleting, re-ordering,
+inserting, rewriting or truncating history in the data store is **detected** by
 `GET /v1/audit/verify`. Redaction, retention archival, verifiable export and a regulator access
 report all work **without breaking the chain**. Every endpoint is behind Spring Security with
 role-based access.
 
-**Stack:** Java 17, Spring Boot 3.5, Spring Security, SQLite (JDBC), SHA-256 and HMAC-SHA256 (JDK).
+**Stack:** Java 17, Spring Boot 3.5, Spring Security, SQLite (JDBC); SHA-256, HMAC-SHA256, Ed25519 and
+AES-256-GCM from the JDK.
 
 ## Quick start (local demo)
 
 Prerequisites: **JDK 17+** and **Maven 3.9+**.
 
 ```bash
-mvn verify                                                   # build, 180 tests, coverage gate, SpotBugs
+mvn verify                                                   # build, 207 tests, coverage gate, SpotBugs
 java -jar target/audit-log.jar --spring.profiles.active=dev  # http://localhost:8080
 ```
 
-The `dev` profile adds four demo users, a demo HMAC key and Swagger UI. Without it the service
-**refuses to start**, because no users or key are configured (fail closed).
+The `dev` profile adds four demo users, demo keys and Swagger UI. Without it the service
+**refuses to start**, because no users or keys are configured (fail closed).
 
 | User | Password | Role | Can |
 |---|---|---|---|
@@ -49,11 +51,13 @@ All of this, plus a full chain rewrite and tail truncation, runs automatically i
 |---|---|---|---|
 | `POST` | `/v1/audit/events` | WRITER | Append an event. Optional `Idempotency-Key` header makes retries safe |
 | `GET` | `/v1/audit/events` | READER, COMPLIANCE, ADMIN | Filter by `actorId`, `resourceType`, `resourceId`, `eventType`, `from`/`to`; keyset pagination (`limit`, `cursor`) |
-| `GET` | `/v1/audit/verify` | READER, COMPLIANCE, ADMIN | Walk the chain: `valid`, `firstInvalidSeq`, `violation`, `headHash`. Optional `anchorSeq` + `anchorHash` |
+| `GET` | `/v1/audit/verify` | READER, COMPLIANCE, ADMIN | Walk the chain: `valid`, `firstInvalidSeq`, `violation`, `headHash`. Checks against the latest signed checkpoint automatically; or pass `anchorSeq` + `anchorHash` |
 | `POST` | `/v1/audit/events/{seq}/redactions` | ADMIN | Redact payload fields without breaking the chain |
 | `POST` | `/v1/audit/retention/run` | ADMIN | Archive records older than the window (never below the legal minimum) |
 | `GET` | `/v1/audit/export?actorId=` or `?resourceId=` | COMPLIANCE | Self-verifiable bundle |
 | `POST` | `/v1/audit/reports/account-access` | COMPLIANCE | Scenario C regulator access report |
+| `POST` | `/v1/audit/checkpoints` | ADMIN | Write a signed head checkpoint now (also runs hourly) |
+| `GET` | `/v1/audit/signing-key` | public | Ed25519 public key for checking bundles and checkpoints offline |
 | `GET` | `/actuator/health` | public | Status only (includes a database check) |
 | `GET` | `/actuator/metrics` | ADMIN | Micrometer metrics, e.g. `audit.verify.failures` |
 
@@ -69,8 +73,11 @@ Verify an exported bundle **offline** (no server or database needed):
 
 ```bash
 curl -s -u compliance:compliance-pass "http://localhost:8080/audit/export?resourceId=acc-1001" -o bundle.json
-java -jar target/audit-log.jar verify-bundle bundle.json [trusted-head-hash]
+curl -s "http://localhost:8080/v1/audit/signing-key"        # copy publicKey
+java -jar target/audit-log.jar verify-bundle bundle.json --public-key <publicKey> [--head <trusted head hash>]
 ```
+
+With `--public-key`, a record added, removed or edited after export fails as `SIGNATURE_INVALID`.
 
 ## Configuration (production)
 
@@ -78,32 +85,39 @@ java -jar target/audit-log.jar verify-bundle bundle.json [trusted-head-hash]
 |---|---|---|
 | `AUDIT_DB_PATH` | `audit.db` | SQLite file |
 | `AUDIT_HMAC_KEY` | _none: required_ | Record MAC secret, ≥ 32 bytes, from a secret manager / KMS |
+| `AUDIT_HMAC_KEY_ID` / `AUDIT_HMAC_RETIRED_KEYS` | `k1` / _empty_ | Key rotation: new id for the new key; old keys as `id=secret,...` (verify only) |
+| `AUDIT_SIGNING_PRIVATE_KEY` / `AUDIT_SIGNING_PUBLIC_KEY` | _none: required_ | Ed25519 key pair (base64 PKCS#8 / X.509) for bundles and checkpoints |
+| `AUDIT_ENCRYPTION_KEY` | _none: required_ | AES-256 key (base64, 32 bytes) for sensitive fields at rest |
+| `AUDIT_CHECKPOINT_FILE` / `AUDIT_CHECKPOINT_INTERVAL_MS` | `audit-checkpoints.jsonl` / 1 h | Signed checkpoints; put the file on WORM storage |
+| `AUDIT_TRUSTED_PROXIES` | _empty_ | Load balancer IPs whose `X-Forwarded-For` is trusted for rate limiting |
 | `audit.security.users[n].*` | _none: required_ | `name`, `password-hash` (`{bcrypt}…` only), `roles` |
 | `AUDIT_RETENTION_MIN_DAYS` | `2190` (6 years) | Legal minimum; nothing younger can ever be archived |
 | `AUDIT_RETENTION_DAYS` | `2190` | Default retention window (must be ≥ the minimum) |
-| `AUDIT_SENSITIVE_FIELDS` | `ssn,accountNumber,taxId,dateOfBirth` | Masked for READER |
+| `AUDIT_SENSITIVE_FIELDS` | `ssn,accountNumber,taxId,dateOfBirth` | Encrypted at rest and masked for READER |
 | `AUDIT_MAX_REQUEST_BYTES` | `65536` | Larger bodies get 413 |
 | `AUDIT_RATE_LIMIT_PER_MINUTE` | `600` | Per client IP, before authentication |
 
-TLS: terminate at the load balancer, or set `server.ssl.*` with a keystore. Spring Security then
-adds HSTS automatically. Swagger UI is off unless the `dev` profile is active.
+TLS: terminate at the load balancer (set `AUDIT_TRUSTED_PROXIES`), or run with the `tls` profile and
+`AUDIT_TLS_KEYSTORE` / `AUDIT_TLS_KEYSTORE_PASSWORD` (PKCS12, TLS 1.3/1.2). Spring Security adds HSTS on
+HTTPS. Swagger UI is off unless the `dev` profile is active.
 
 ## Quality gates (`mvn verify`, also run by CI on every push)
 
 * Compiler with `-Xlint:all -Werror`: any warning fails the build
-* 180 JUnit 5 tests: unit, API integration, security matrix, direct-database tampering,
-  fault injection, concurrency, privacy
-* JaCoCo coverage gate: line ≥ 90%, branch ≥ 85% (currently 96.1% / 92.0%); CI publishes the report
+* 207 JUnit 5 tests: unit, API integration, security matrix, direct-database tampering,
+  fault injection, encryption, checkpoints, concurrency, privacy
+* JaCoCo coverage gate: line ≥ 90%, branch ≥ 85% (currently 96.0% / 91.1%); CI publishes the report
 * SpotBugs + FindSecBugs: each suppression is explained in `spotbugs-exclude.xml`
-* Dependabot: weekly dependency vulnerability updates
+* Dependency scanning: Dependabot weekly, plus OWASP dependency-check weekly in CI (fails on CVSS ≥ 7;
+  needs an `NVD_API_KEY` secret). Locally: `mvn -P security-scan verify -DnvdApiKey=...`
 * Benchmark (opt-in): `mvn test -Dtest=PerfBenchmarkTest -Dperf.excluded=none`
 
 ## Project layout
 
 ```
 src/main/java/com/audit/
-  chain/       HashChain, ChainVerifier, IntegrityKey, records, offline CLI: pure, no I/O
-  store/       AuditStore: the only class that touches the database
+  chain/       HashChain, ChainVerifier, IntegrityKey (MAC keys), SigningKey (Ed25519), records, offline CLI
+  store/       AuditStore (the only class that touches the database), FieldCipher, CheckpointService
   security/    SecurityConfig (roles, fail-closed users), RequestGuardFilter (size + rate), LogSafe
   api/         AuditController, request/response DTOs, error mapping
   compliance/  AccessReportService + typed AccessReport (Scenario C)

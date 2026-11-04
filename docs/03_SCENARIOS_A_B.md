@@ -21,9 +21,10 @@ The brief's validation flow (write → query → verify → modify in DB → ver
 
 | Task | Intent & constraints | Execution | Validation (tests) |
 |---|---|---|---|
+| B0 Encryption at rest | Sensitive fields never stored in plaintext | `FieldCipher` (AES-256-GCM) in `AuditStore`; hashes over plaintext | `EncryptionAtRestTest` (7): raw DB scan, plaintext via API, redaction, tampered ciphertext, wrong key |
 | B1 Redaction | Remove PII, keep chain verifiable, keep accountability, no guessing | Salted per-field commitments; value and salt dropped; `RECORD_REDACTED` appended; `secure_delete` + WAL checkpoint | `RedactionTest`: chain valid, multi-field + duplicates, value gone from **raw DB/WAL bytes**, forged redaction, edited redaction event, 400/404/409 paths |
 | B2 Retention | Configurable window with a legal minimum; no false positives; can't destroy evidence | Tombstones keep chain columns; prefix only; `RECORDS_ARCHIVED.throughSeq`; floor of 6 years enforced on the server and checked by verify | `RetentionTest` (12): default window, floor rejected, young records kept, empty log, repeated runs, tombstone edits, out-of-policy tombstones; `AuditStoreTest.verifyFlagsAnArchiveRunBelowTheFloor` |
-| B3 Export | Self-contained bundle a recipient can verify independently | `GET /v1/audit/export` (COMPLIANCE), one streaming pass; `java -jar audit-log.jar verify-bundle` | `ExportTest`: filters, empty log, 5 tamper variants, bundle spanning redacted + archived history, CLI exit codes incl. a bundle with no head |
+| B3 Export | Self-contained bundle a recipient can verify independently, including that nothing was dropped | `GET /v1/audit/export` (COMPLIANCE), one streaming pass, Ed25519-signed; `java -jar audit-log.jar verify-bundle --public-key` | `ExportTest` (15): filters, empty log, 5 tamper variants, a dropped record caught by the signature, foreign key, bundle spanning redacted + archived history, CLI exit codes |
 
 ## Problems caught during development
 

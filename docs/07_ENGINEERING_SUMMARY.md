@@ -63,7 +63,7 @@ production · Scenario C assumptions in [04](04_SCENARIO_C_COMPLIANCE.md) §1.
 * Export bundles can't prove completeness (records could be omitted from a bundle).
 * Nested-field redaction is not supported (redact the parent key).
 
-## What I would do next (in order)
+## Next steps (in order)
 
 1. OIDC tokens instead of Basic, and KMS-held HMAC keys with rotation.
 2. Automatic signed checkpoints to WORM storage, and incremental verify from the last one.

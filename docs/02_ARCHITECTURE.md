@@ -32,11 +32,11 @@ core small (~490 lines including records and the CLI), easy to review and easy t
 | `timestamp` | Server-assigned UTC `YYYY-MM-DDTHH:MM:SS.ffffffZ`, monotonic (fixed width, so lexical = chronological) |
 | `event_type, actor_id, resource_type, resource_id` | Indexed with `seq` for keyset queries. `actor_id` = who the event is about, as asserted by the submitter |
 | `recorded_by` | The **authenticated** submitter (from Spring Security), inside the hash: attribution can't be forged |
-| `payload` JSON | Event detail. Redacted fields hold `"[REDACTED]"` |
+| `payload` JSON | Event detail. Redacted fields hold `"[REDACTED]"`. Sensitive fields are stored as `enc:v1:` AES-256-GCM ciphertext |
 | `salts` JSON | `{field: 128-bit random salt}`. **A missing salt marks a redacted field** |
 | `field_hashes` JSON | `{field: SHA-256(salt ‖ canonical([field, value]))}`: the payload commitments |
 | `prev_hash`, `hash` | The chain |
-| `mac` | `HMAC-SHA256(server key, hash)`: only the service can produce it |
+| `mac` | `keyId:HMAC-SHA256(key, hash)`: only the service can produce it; the key id allows rotation |
 | `archived` | 1 = retention tombstone (content NULLed, chain columns kept) |
 
 A second table, `idempotency_keys (key, request_hash, seq)`, makes retried writes safe.
@@ -51,7 +51,7 @@ detection relies on the hash chain and MACs, not on the triggers.
 fieldHashes[k] = SHA256( salt_k ‖ canonical([k, payload[k]]) )
 hash_n         = SHA256( canonical({seq, timestamp, eventType, actorId, recordedBy, resourceType,
                                     resourceId, fieldHashes, prevHash = hash_{n-1}}) )
-mac_n          = HMAC-SHA256( serverKey, hash_n )
+mac_n          = keyId ":" HMAC-SHA256( key[keyId], hash_n )
 hash_0 (genesis prevHash) = "000…0" (64 hex)
 ```
 
@@ -67,9 +67,15 @@ hash_0 (genesis prevHash) = "000…0" (64 hex)
   MACs without the key (from `AUDIT_HMAC_KEY`, a secret manager / KMS in production), so a full
   rewrite fails as `MAC_MISMATCH`. Keeping the plain hash chain means export recipients can still
   verify offline without the key.
-* **Truncation** of the newest records can't be detected from inside the log. `verify` returns
-  `headSeq/headHash`; store them periodically in WORM storage and pass them back as
-  `anchorSeq/anchorHash`, and missing tail records are reported as `ANCHOR_MISMATCH`.
+* **Truncation** of the newest records can't be detected from inside the log alone. A scheduled job
+  (hourly, or `POST /v1/audit/checkpoints`) appends an **Ed25519-signed checkpoint** of the head to a
+  file meant for WORM storage. `verify` uses the latest checkpoint as its anchor automatically, so
+  missing tail records are reported as `ANCHOR_MISMATCH`, and an edited checkpoint file as
+  `CHECKPOINT_INVALID`. Explicit `anchorSeq/anchorHash` parameters still work.
+* **Key rotation:** new records use the current key id; retired keys only verify old records.
+* **Encryption at rest:** sensitive payload fields are AES-256-GCM encrypted with a random IV before
+  they are written. Hashes cover the plaintext, so verification is unaffected; tampered ciphertext
+  or a wrong key reads as `CORRUPT_RECORD`.
 
 ### Hash algorithm choice: SHA-256
 
@@ -78,7 +84,7 @@ hash_0 (genesis prevHash) = "000…0" (64 hex)
 | **SHA-256** ✅ | FIPS 180-4 approved (matters in a regulated broker-dealer), built into the JDK and every HSM, 128-bit collision resistance, ~0.03 ms per record here |
 | SHA-3 / BLAKE2/3 | Equally secure; BLAKE3 is faster, but neither is a plain JDK/FIPS default everywhere. No benefit at this scale |
 | MD5 / SHA-1 | Broken collision resistance. Rejected |
-| HMAC-SHA-256 (keyed) | **Added as a per-record MAC** next to the plain hash (see above). Key rotation is not implemented yet |
+| HMAC-SHA-256 (keyed) | **Added as a per-record MAC** next to the plain hash, with key ids for rotation |
 
 ### Linear chain vs Merkle tree
 
@@ -136,10 +142,11 @@ report notes it in `integrity`. Nothing bad data can do turns verify into an HTT
 
 ### Export bundle
 
-`{records (with salts), chain: [{seq, prevHash, hash}] first→head, head}`. The offline verifier
-checks each record's commitments and hash, segment continuity, membership of each record in the
-segment, and the head. Comparing `head.hash` with a trusted checkpoint proves the records haven't
-changed since export.
+`{records (with salts), chain: [{seq, prevHash, hash}] first→head, head, signature}`. The offline
+verifier checks each record's commitments and hash, segment continuity, membership of each record in
+the segment, and the head. The **Ed25519 signature** covers the whole bundle, so with the service's
+public key (`GET /v1/audit/signing-key`) a recipient also detects records added, removed or changed
+after export, which the hashes alone can't show.
 
 ## 5. API design notes
 
@@ -172,12 +179,14 @@ changed since export.
 | Authorisation | WRITER: append · READER: query, verify (masked) · COMPLIANCE: unmasked query, export, reports · ADMIN: redaction, retention, query, verify, metrics. Export is COMPLIANCE only (least privilege) |
 | Attribution | `recordedBy` = authenticated name, in the hash. `requestedBy` is never read from a body |
 | Sensitive data | Configurable fields (`ssn`, `accountNumber`, …) masked for READER; display only, hashes unchanged |
-| Abuse limits | Per-IP rate limit (429) and 64 KB body limit (413), both **before** authentication, so password guessing is throttled too |
-| Integrity key | `AUDIT_HMAC_KEY` ≥ 32 bytes, required at startup |
+| Abuse limits | Per-client rate limit (429) and 64 KB body limit (413), both **before** authentication, so password guessing is throttled too. Behind a load balancer the client IP comes from `X-Forwarded-For`, trusted only from `audit.trusted-proxies` |
+| Keys | HMAC key (≥ 32 bytes, rotatable), Ed25519 signing pair, AES-256 field key: all required at startup, none have defaults |
+| Data at rest | Sensitive fields AES-256-GCM encrypted; redacted values physically erased (`secure_delete` + WAL checkpoint) |
+| Transport | TLS at the load balancer, or the `tls` profile (TLS 1.3/1.2); HSTS on HTTPS |
 | Headers | Spring Security defaults: `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Cache-Control: no-store`; HSTS over HTTPS |
 | Logging | `audit.security` log: auth failures, access denied, tamper detected (ERROR), redactions, retention runs, rate limiting. Caller text is sanitized (no log injection) |
 | Exposure | Swagger and the API schema are off unless the `dev` profile is active; `/actuator/health` shows status only |
-| Supply chain | SpotBugs + FindSecBugs in the build; Dependabot weekly |
+| Supply chain | SpotBugs + FindSecBugs in the build; Dependabot weekly; OWASP dependency-check weekly (CVSS ≥ 7 fails) |
 
 Upgrading to OAuth2/OIDC tokens or mTLS changes only `SecurityConfig`; the chain package doesn't
 know about identity at all.
@@ -192,11 +201,14 @@ know about identity at all.
 | Fake redaction or archival in the DB | ✅ | `UNAUTHORIZED_REDACTION` / `UNAUTHORIZED_ARCHIVE` |
 | Forge system events via the API | ✅ | Rejected (400) |
 | Full chain rewrite by someone with DB access (the hash algorithm is public) | ✅ | Per-record MAC with the server key → `MAC_MISMATCH` |
-| Truncate the newest records | ✅ with an anchor | `verify?anchorSeq=&anchorHash=` against a head stored externally → `ANCHOR_MISMATCH` |
+| Truncate the newest records | ✅ | Signed checkpoint used automatically by verify → `ANCHOR_MISMATCH` |
+| Edit the checkpoint file | ✅ | Ed25519 signature → `CHECKPOINT_INVALID` |
+| Drop or edit records in an exported bundle | ✅ | Bundle signature → `SIGNATURE_INVALID` (offline, with the public key) |
+| Read PII straight from the database file | ✅ | Sensitive fields are AES-256-GCM ciphertext |
 | Archive records younger than the legal minimum | ✅ | Refused (400); verify flags `RETENTION_POLICY_VIOLATION` |
 | Anonymous or wrong-role access, forged submitter | ✅ | Spring Security roles; `recordedBy` from the login |
 | Corrupt or unparseable row | ✅ | `CORRUPT_RECORD` at that seq; reads keep working |
-| **Attacker who also steals the HMAC key** | ⚠️ | Keep the key in a KMS/HSM, outside the DB host; anchor heads externally |
+| **Attacker who steals the keys as well as the DB** | ⚠️ | Keep keys in a KMS/HSM, outside the DB host, and the checkpoint file on WORM storage |
 
 **Failure scenarios handled (each tested):** concurrent writers (serialized; 80 writes from an
 8-thread pool), clock stepping backwards (timestamp clamped monotonic), an insert failing
@@ -206,7 +218,6 @@ bodies (413 before parsing) and payloads (32 KB cap), duplicate retries (idempot
 
 ## 7. Production evolution
 
-Postgres (only `AuditStore` changes), key rotation and KMS-held HMAC keys, signed periodic
-checkpoints written to WORM storage automatically (incremental verify from the last checkpoint
-instead of O(n)), Merkle proofs and per-filter commitments for complete exports, OIDC tokens
-instead of Basic, field-level encryption of PII at rest, and a distributed rate limiter.
+Postgres (only `AuditStore` changes), KMS/HSM-held keys, incremental verify from the last
+checkpoint instead of O(n), OIDC tokens instead of Basic, encryption-key rotation, and a
+distributed rate limiter for more than one instance.
