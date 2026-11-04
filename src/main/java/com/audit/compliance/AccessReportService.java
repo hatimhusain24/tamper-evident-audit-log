@@ -83,8 +83,9 @@ public class AccessReportService {
         a.put("actorId", e.actorId());
         a.put("action", e.eventType());
         a.put("accountId", e.resourceId());
-        a.put("purpose", e.payload().get("purpose"));
-        a.put("channel", e.payload().get("channel"));
+        Map<String, Object> payload = e.payload() == null ? Map.of() : e.payload();   // corrupt row
+        a.put("purpose", payload.get("purpose"));
+        a.put("channel", payload.get("channel"));
         a.put("hash", e.hash());
         return a;
     }

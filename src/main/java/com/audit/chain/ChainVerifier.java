@@ -28,7 +28,7 @@ public final class ChainVerifier {
         if (failure != null) {
             return false;
         }
-        Violation v = HashChain.check(r, prev == null ? HashChain.GENESIS_HASH : prev.hash(), checked + 1);
+        Violation v = HashChain.safeCheck(r, prev == null ? HashChain.GENESIS_HASH : prev.hash(), checked + 1);
         if (v == null && r.archived() && r.seq() != lastArchived + 1) {
             v = new Violation("UNAUTHORIZED_ARCHIVE", "tombstones must form a contiguous prefix of the chain");
         }

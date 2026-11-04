@@ -165,6 +165,30 @@ class HashChainTest {
     }
 
     @Test
+    void recordThatCannotBeCheckedIsCorruptNotACrash() {
+        List<AuditRecord> c = chain(2);
+        c.get(1).salts().put("field", null);                       // HexFormat would throw
+        VerifyResult result = HashChain.verify(c);
+        assertThat(result.violation()).isEqualTo("CORRUPT_RECORD");
+        assertThat(result.firstInvalidSeq()).isEqualTo(2);
+    }
+
+    @Test
+    void untombstonedRecordWithPurgedContentIsCorrupt() {
+        List<AuditRecord> c = chain(2);
+        AuditRecord t = c.get(0);
+        c.set(0, new AuditRecord(t.seq(), t.timestamp(), null, null, null, null, null, null, null,
+                t.prevHash(), t.hash(), false));                    // archived flag cleared, content gone
+        assertThat(HashChain.verify(c).violation()).isEqualTo("CORRUPT_RECORD");
+    }
+
+    @Test
+    void bundleWithoutHeadIsMalformedNotACrash() {
+        Bundle b = new Bundle("audit-bundle/v1", "t", "sha256", List.of(), List.of(), null);
+        assertThat(HashChain.verifyBundle(b).violation()).isEqualTo("MALFORMED_BUNDLE");
+    }
+
+    @Test
     void fieldHashIsDeterministicForSameSalt() {
         String salt = "00".repeat(16);
         assertThat(HashChain.fieldHash(salt, "k", Arrays.asList(1, "a")))

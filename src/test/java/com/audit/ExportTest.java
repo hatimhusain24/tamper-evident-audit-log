@@ -128,9 +128,12 @@ class ExportTest extends ApiTestBase {
             assertThat(BundleVerifierCli.run(new String[] {"verify-bundle", file.toString(), "f".repeat(64)})).isEqualTo(1);
             assertThat(BundleVerifierCli.run(new String[] {"verify-bundle", dir.resolve("missing.json").toString()})).isEqualTo(2);
             assertThat(BundleVerifierCli.run(new String[] {"verify-bundle"})).isEqualTo(2);
+            Path headless = dir.resolve("headless.json");
+            Files.writeString(headless, "{\"records\":[],\"chain\":[]}");
+            assertThat(BundleVerifierCli.run(new String[] {"verify-bundle", headless.toString()})).isEqualTo(1);
         } finally {
             System.setOut(original);
         }
-        assertThat(out.toString(StandardCharsets.UTF_8)).contains("HEAD_MISMATCH");
+        assertThat(out.toString(StandardCharsets.UTF_8)).contains("HEAD_MISMATCH").contains("MALFORMED_BUNDLE");
     }
 }

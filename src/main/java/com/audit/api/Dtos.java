@@ -1,6 +1,7 @@
 package com.audit.api;
 
 import com.audit.chain.AuditRecord;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -36,7 +37,7 @@ public final class Dtos {
     }
 
     /** olderThanDays defaults to audit.retention-days. */
-    public record RetentionRequest(@PositiveOrZero Double olderThanDays, @Size(max = 128) String requestedBy) {
+    public record RetentionRequest(@PositiveOrZero @Max(36_500) Double olderThanDays, @Size(max = 128) String requestedBy) {
     }
 
     /** event = the chained RECORDS_ARCHIVED event that authorizes this run (null if nothing archived). */

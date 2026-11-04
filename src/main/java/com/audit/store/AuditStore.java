@@ -328,11 +328,12 @@ public final class AuditStore {
         }
     }
 
+    /** Unreadable JSON maps to null, so verify reports CORRUPT_RECORD and queries keep working. */
     private <T> T fromJson(String text, TypeReference<T> type) {
         try {
             return text == null ? null : json.readValue(text, type);
         } catch (JsonProcessingException e) {
-            throw new IllegalStateException("corrupt JSON column", e);
+            return null;
         }
     }
 }

@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 
 /**
@@ -111,12 +112,16 @@ public final class HashChain {
             return new Violation("SEQUENCE_GAP",
                     "expected seq " + expectedSeq + ", found " + r.seq() + " (deleted/inserted)");
         }
-        if (!r.prevHash().equals(prevHash)) {
+        if (!Objects.equals(r.prevHash(), prevHash)) {
             return new Violation("CHAIN_LINK_BROKEN",
                     "prevHash does not equal the previous record's hash");
         }
         if (r.archived()) {
             return null; // tombstone: content purged by retention; the link above is still checked
+        }
+        if (r.timestamp() == null || r.eventType() == null || r.actorId() == null || r.resourceType() == null
+                || r.resourceId() == null || r.payload() == null || r.salts() == null || r.fieldHashes() == null) {
+            return new Violation("CORRUPT_RECORD", "a required column is missing or unreadable");
         }
         Map<String, Object> payload = r.payload();
         Map<String, String> salts = r.salts();
@@ -134,10 +139,22 @@ public final class HashChain {
                         "payload field '" + key + "' has no salt but is not redacted");
             }
         }
-        if (!recordHash(r).equals(r.hash())) {
+        if (!Objects.equals(recordHash(r), r.hash())) {
             return new Violation("HASH_MISMATCH", "record content does not match its stored hash");
         }
         return null;
+    }
+
+    /**
+     * Like {@link #check}, but never throws: a record that can't even be checked (wrong types,
+     * missing salt values) is reported as CORRUPT_RECORD instead of crashing the verifier.
+     */
+    public static Violation safeCheck(AuditRecord r, String prevHash, long expectedSeq) {
+        try {
+            return check(r, prevHash, expectedSeq);
+        } catch (RuntimeException e) {
+            return new Violation("CORRUPT_RECORD", "record cannot be checked (" + e.getClass().getSimpleName() + ")");
+        }
     }
 
     /** Verify a whole chain held in memory (tests, small chains). The service streams instead. */
@@ -158,11 +175,15 @@ public final class HashChain {
      * records were not altered since export.
      */
     public static VerifyResult verifyBundle(Bundle bundle) {
+        if (bundle.head() == null || bundle.chain() == null || bundle.records() == null) {
+            return new VerifyResult(false, 0, 0, null, null, "MALFORMED_BUNDLE",
+                    "bundle must contain head, chain and records");
+        }
         var links = bundle.chain();
         for (int i = 1; i < links.size(); i++) {
             var prev = links.get(i - 1);
             var cur = links.get(i);
-            if (cur.seq() != prev.seq() + 1 || !cur.prevHash().equals(prev.hash())) {
+            if (cur.seq() != prev.seq() + 1 || !Objects.equals(cur.prevHash(), prev.hash())) {
                 return bundleFailure(bundle, cur.seq(), new Violation("CHAIN_LINK_BROKEN",
                         "chain segment is not contiguous"));
             }
@@ -175,11 +196,11 @@ public final class HashChain {
         links.forEach(link -> bySeq.put(link.seq(), link));
         for (AuditRecord r : bundle.records()) {
             Bundle.Link link = bySeq.get(r.seq());
-            if (link == null || !link.hash().equals(r.hash())) {
+            if (link == null || !Objects.equals(link.hash(), r.hash())) {
                 return bundleFailure(bundle, r.seq(), new Violation("NOT_IN_CHAIN",
                         "record hash is not in the chain segment"));
             }
-            Violation v = check(r, link.prevHash(), r.seq());
+            Violation v = safeCheck(r, link.prevHash(), r.seq());
             if (v != null) {
                 return bundleFailure(bundle, r.seq(), v);
             }
