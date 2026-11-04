@@ -92,10 +92,22 @@ public class SecurityConfig {
             if (u.roles() == null || u.roles().isEmpty() || !ROLES.containsAll(u.roles())) {
                 throw new IllegalStateException("User " + u.name() + " has missing or unknown roles " + u.roles());
             }
+            boolean readerOnly = u.roles().contains("READER") && !u.roles().contains("COMPLIANCE")
+                    && !u.roles().contains("ADMIN");
+            if (readerOnly && (u.resourceScopes() == null || u.resourceScopes().isEmpty())) {
+                throw new IllegalStateException("READER " + u.name() + " must declare resource-scopes "
+                        + "(least privilege: readers never see every client's data)");
+            }
             return User.withUsername(u.name()).password(u.passwordHash())
                     .roles(u.roles().toArray(String[]::new)).build();
         }).toList();
         return new InMemoryUserDetailsManager(details);
+    }
+
+    /** Per-user resource scopes; invalid patterns fail startup. */
+    @Bean
+    public ResourceScopes resourceScopes(AuditSecurityProperties properties) {
+        return ResourceScopes.from(properties.users() == null ? List.of() : properties.users());
     }
 
     @EventListener

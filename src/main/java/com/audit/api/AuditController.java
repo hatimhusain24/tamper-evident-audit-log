@@ -16,6 +16,7 @@ import com.audit.store.AuditStore;
 import com.audit.store.CheckpointService;
 import com.audit.store.FieldCipher;
 import com.audit.security.LogSafe;
+import com.audit.security.ResourceScopes;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -64,9 +65,10 @@ public final class AuditController {
     private final MeterRegistry metrics;
     private final SigningKey signingKey;
     private final CheckpointService checkpoints;
+    private final ResourceScopes scopes;
 
     public AuditController(AuditStore store, AccessReportService reports, MeterRegistry metrics, SigningKey signingKey,
-                           CheckpointService checkpoints,
+                           CheckpointService checkpoints, ResourceScopes scopes,
                            @Value("${audit.retention-days:2190}") double retentionDays,
                            @Value("${audit.sensitive-fields:}") Set<String> sensitiveFields) {
         if (retentionDays < store.retentionMinDays()) {   // fail fast on an unsafe deployment
@@ -80,6 +82,15 @@ public final class AuditController {
         this.metrics = metrics;
         this.signingKey = signingKey;
         this.checkpoints = checkpoints;
+        this.scopes = scopes;
+    }
+
+    /** Bulk and admin operations span every resource, so they need a user without resource scopes. */
+    private void requireUnrestricted(Authentication auth) {
+        if (!scopes.unrestricted(auth.getName())) {
+            SECURITY_LOG.warn("scoped user denied bulk operation user={}", LogSafe.clean(auth.getName()));
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "this operation needs access to all resources");
+        }
     }
 
     /** READERs see sensitive payload fields masked; COMPLIANCE and ADMIN see them in full. */
@@ -97,6 +108,11 @@ public final class AuditController {
     public ResponseEntity<EventView> write(@Valid @RequestBody EventRequest event, Authentication auth,
             @RequestHeader(value = "Idempotency-Key", required = false)
             @Pattern(regexp = "^[A-Za-z0-9_-]{8,64}$") String idempotencyKey) {
+        if (!scopes.allows(auth.getName(), event.resourceType(), event.resourceId())) {
+            SECURITY_LOG.warn("write outside resource scope user={} resource={}:{}", LogSafe.clean(auth.getName()),
+                    LogSafe.clean(event.resourceType()), LogSafe.clean(event.resourceId()));
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "resource is outside your scope");
+        }
         if (HashChain.SYSTEM_EVENTS.contains(event.eventType())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     event.eventType() + " is a reserved system event type");
@@ -140,7 +156,7 @@ public final class AuditController {
         filters.put("resourceType", resourceType);
         filters.put("resourceId", resourceId);
         filters.put("eventType", eventType);
-        AuditStore.Page page = store.query(filters, from, to, limit, cursor);
+        AuditStore.Page page = store.query(filters, from, to, limit, cursor, scopes.of(auth.getName()));
         Set<String> mask = maskFor(auth);
         return new EventPage(page.items().stream().map(r -> EventView.of(r, mask)).toList(), page.nextCursor());
     }
@@ -177,6 +193,7 @@ public final class AuditController {
     @PostMapping(value = "/audit/events/{seq}/redactions", consumes = MediaType.APPLICATION_JSON_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
     public EventView redact(@PathVariable long seq, @Valid @RequestBody RedactionRequest body, Authentication auth) {
+        requireUnrestricted(auth);
         EventView event = EventView.of(store.redact(seq, body.fields(), body.reason(), auth.getName()));
         SECURITY_LOG.info("redaction seq={} fields={} by={}", seq, LogSafe.clean(String.valueOf(body.fields())),
                 LogSafe.clean(auth.getName()));
@@ -186,6 +203,7 @@ public final class AuditController {
     @PostMapping(value = "/audit/retention/run", consumes = MediaType.APPLICATION_JSON_VALUE)
     public RetentionResponse runRetention(@Valid @RequestBody(required = false) RetentionRequest body,
                                           Authentication auth) {
+        requireUnrestricted(auth);
         double days = body == null || body.olderThanDays() == null ? retentionDays : body.olderThanDays();
         AuditStore.RetentionResult result = store.archive(days, auth.getName());
         SECURITY_LOG.info("retention run olderThanDays={} archived={} by={}", days, result.archivedCount(),
@@ -196,7 +214,8 @@ public final class AuditController {
     /** All records for ONE actorId or resourceId, as a bundle anyone can verify offline. */
     @GetMapping("/audit/export")
     public Bundle export(@RequestParam(required = false) String actorId,
-                         @RequestParam(required = false) String resourceId) {
+                         @RequestParam(required = false) String resourceId, Authentication auth) {
+        requireUnrestricted(auth);
         if ((actorId == null) == (resourceId == null)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "provide exactly one of actorId or resourceId");
         }
@@ -206,7 +225,8 @@ public final class AuditController {
 
     /** Write a signed checkpoint of the current head now (normally done on a schedule). */
     @PostMapping("/audit/checkpoints")
-    public CheckpointService.Checkpoint checkpoint() {
+    public CheckpointService.Checkpoint checkpoint(Authentication auth) {
+        requireUnrestricted(auth);
         return checkpoints.checkpoint().orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
                 "nothing to checkpoint: the log is empty or fails verification"));
     }
@@ -224,6 +244,7 @@ public final class AuditController {
     @PostMapping(value = "/audit/reports/account-access", consumes = MediaType.APPLICATION_JSON_VALUE)
     public AccessReport accountAccessReport(@Valid @RequestBody(required = false) ReportRequest body,
                                             Authentication auth) {
+        requireUnrestricted(auth);
         ReportRequest scope = body == null ? new ReportRequest(null, null, null) : body;
         return reports.accessReport(scope.accountId(), scope.from(), scope.to(), auth.getName());
     }

@@ -10,11 +10,12 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * audit.security.users[0].name=ingest-service
  * audit.security.users[0].password-hash={bcrypt}$2a$10$...
  * audit.security.users[0].roles=WRITER
+ * audit.security.users[0].resource-scopes=CLIENT_ACCOUNT:acc-1*   (optional; required for READER)
  * </pre>
  */
 @ConfigurationProperties("audit.security")
 public record AuditSecurityProperties(List<ApiUser> users) {
 
-    public record ApiUser(String name, String passwordHash, List<String> roles) {
+    public record ApiUser(String name, String passwordHash, List<String> roles, List<String> resourceScopes) {
     }
 }

@@ -210,9 +210,9 @@ class SecurityTest extends ApiTestBase {
 
     @Test
     void refusesPlaintextPasswordsAndUnknownRoles() {
-        assertThatThrownBy(() -> new SecurityConfig().users(users(new ApiUser("u", "{noop}secret", List.of("READER")))))
+        assertThatThrownBy(() -> new SecurityConfig().users(users(new ApiUser("u", "{noop}secret", List.of("READER"), null))))
                 .hasMessageContaining("bcrypt");
-        assertThatThrownBy(() -> new SecurityConfig().users(users(new ApiUser("u", "{bcrypt}x", List.of("SUPERUSER")))))
+        assertThatThrownBy(() -> new SecurityConfig().users(users(new ApiUser("u", "{bcrypt}x", List.of("SUPERUSER"), null))))
                 .hasMessageContaining("unknown roles");
     }
 }

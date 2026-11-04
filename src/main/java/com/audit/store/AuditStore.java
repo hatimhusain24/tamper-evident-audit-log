@@ -6,6 +6,7 @@ import com.audit.chain.ChainVerifier;
 import com.audit.chain.HashChain;
 import com.audit.chain.IntegrityKey;
 import com.audit.chain.VerifyResult;
+import com.audit.security.ResourceScopes;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -322,8 +323,34 @@ public final class AuditStore {
 
     /** Keyset pagination on seq. {@code from} is inclusive, {@code to} exclusive. */
     public Page query(Map<String, String> filters, Instant from, Instant to, int limit, long cursor) {
+        return query(filters, from, to, limit, cursor, List.of());
+    }
+
+    /**
+     * As above, limited to the caller's resource scopes (empty = unrestricted). The scope filter is
+     * part of the SQL, so pages stay full and out-of-scope rows are never read.
+     */
+    public Page query(Map<String, String> filters, Instant from, Instant to, int limit, long cursor,
+                      List<ResourceScopes.Scope> scopes) {
         StringBuilder where = new StringBuilder("archived = 0 AND seq > ?");
         List<Object> params = new ArrayList<>(List.of(cursor));
+        if (!scopes.isEmpty()) {
+            List<String> any = new ArrayList<>();
+            for (ResourceScopes.Scope s : scopes) {
+                String type = "*".equals(s.type()) ? "1 = 1" : "resource_type = ?";
+                if (!"*".equals(s.type())) {
+                    params.add(s.type());
+                }
+                if (s.exactId()) {
+                    any.add("(" + type + " AND resource_id = ?)");
+                    params.add(s.idPrefix());
+                } else {
+                    any.add("(" + type + " AND resource_id LIKE ? ESCAPE '\\')");
+                    params.add(s.idPrefix().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%");
+                }
+            }
+            where.append(" AND (").append(String.join(" OR ", any)).append(")");
+        }
         FILTERS.forEach((key, column) -> {
             if (filters.get(key) != null) {
                 where.append(" AND ").append(column).append(" = ?");
