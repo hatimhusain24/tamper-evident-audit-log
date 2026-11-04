@@ -12,8 +12,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
+@EnableScheduling
 @OpenAPIDefinition(info = @Info(title = "Tamper-Evident Audit Log", version = "1.0.0",
         description = "Append-only, hash-chained audit events. No update or delete API."),
         security = @SecurityRequirement(name = "basicAuth"))

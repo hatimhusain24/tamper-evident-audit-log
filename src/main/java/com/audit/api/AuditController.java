@@ -13,6 +13,7 @@ import com.audit.chain.VerifyResult;
 import com.audit.compliance.AccessReport;
 import com.audit.compliance.AccessReportService;
 import com.audit.store.AuditStore;
+import com.audit.store.CheckpointService;
 import com.audit.security.LogSafe;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.validation.Valid;
@@ -61,8 +62,10 @@ public final class AuditController {
     private final Set<String> sensitiveFields;
     private final MeterRegistry metrics;
     private final SigningKey signingKey;
+    private final CheckpointService checkpoints;
 
     public AuditController(AuditStore store, AccessReportService reports, MeterRegistry metrics, SigningKey signingKey,
+                           CheckpointService checkpoints,
                            @Value("${audit.retention-days:2190}") double retentionDays,
                            @Value("${audit.sensitive-fields:}") Set<String> sensitiveFields) {
         if (retentionDays < store.retentionMinDays()) {   // fail fast on an unsafe deployment
@@ -75,6 +78,7 @@ public final class AuditController {
         this.sensitiveFields = Set.copyOf(sensitiveFields);
         this.metrics = metrics;
         this.signingKey = signingKey;
+        this.checkpoints = checkpoints;
     }
 
     /** READERs see sensitive payload fields masked; COMPLIANCE and ADMIN see them in full. */
@@ -138,8 +142,8 @@ public final class AuditController {
 
     /**
      * Walks the full chain: hashes, MACs and policies. Returns valid, first bad seq and violation
-     * type, plus the head. Store the head externally (WORM) and pass it back as an anchor later to
-     * prove no records were removed from the end.
+     * type, plus the head. Without explicit anchor parameters, the latest signed checkpoint is used
+     * as the anchor, so records removed from the end are detected automatically.
      */
     @GetMapping("/audit/verify")
     public VerifyResult verify(@RequestParam(required = false) @Min(1) Long anchorSeq,
@@ -147,7 +151,16 @@ public final class AuditController {
         if ((anchorSeq == null) != (anchorHash == null)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "give both anchorSeq and anchorHash, or neither");
         }
-        VerifyResult result = store.verify(anchorSeq, anchorHash);
+        VerifyResult result;
+        var checkpoint = anchorSeq == null ? checkpoints.latest() : java.util.Optional.<CheckpointService.Checkpoint>empty();
+        if (checkpoint.isPresent() && !checkpoints.isAuthentic(checkpoint.get())) {
+            result = new VerifyResult(false, 0, 0, null, null, "CHECKPOINT_INVALID",
+                    "the latest checkpoint's signature does not verify (checkpoint file was altered)");
+        } else if (checkpoint.isPresent()) {
+            result = store.verify(checkpoint.get().seq(), checkpoint.get().hash());
+        } else {
+            result = store.verify(anchorSeq, anchorHash);
+        }
         if (!result.valid()) {   // tamper evidence: alert-worthy
             metrics.counter("audit.verify.failures", "violation", result.violation()).increment();
             SECURITY_LOG.error("chain verification failed violation={} seq={} detail={}",
@@ -184,6 +197,13 @@ public final class AuditController {
         }
         Bundle bundle = actorId != null ? store.export(true, actorId) : store.export(false, resourceId);
         return bundle.withSignature(signingKey.sign(bundle.signedBytes()));
+    }
+
+    /** Write a signed checkpoint of the current head now (normally done on a schedule). */
+    @PostMapping("/audit/checkpoints")
+    public CheckpointService.Checkpoint checkpoint() {
+        return checkpoints.checkpoint().orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
+                "nothing to checkpoint: the log is empty or fails verification"));
     }
 
     /** The public half of the signing key, so recipients can check bundles and checkpoints offline. */

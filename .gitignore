@@ -5,3 +5,4 @@ bundle*.json
 .idea/
 *.iml
 .vscode/
+audit-checkpoints.jsonl

@@ -64,7 +64,8 @@ public class SecurityConfig {
                     .hasAnyRole("READER", "COMPLIANCE", "ADMIN")
                 .requestMatchers(HttpMethod.GET, "/v1/audit/export").hasRole("COMPLIANCE")   // raw PII + salts
                 .requestMatchers(HttpMethod.POST, "/v1/audit/reports/account-access").hasRole("COMPLIANCE")
-                .requestMatchers(HttpMethod.POST, "/v1/audit/events/*/redactions", "/v1/audit/retention/run")
+                .requestMatchers(HttpMethod.POST, "/v1/audit/events/*/redactions", "/v1/audit/retention/run",
+                        "/v1/audit/checkpoints")
                     .hasRole("ADMIN")
                 .requestMatchers(HttpMethod.GET, "/actuator/**").hasRole("ADMIN")
                 .anyRequest().denyAll());

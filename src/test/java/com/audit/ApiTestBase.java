@@ -65,6 +65,7 @@ public abstract class ApiTestBase {
     static void database(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", () -> "jdbc:sqlite:" + DB_DIR.resolve("audit.db")
                 + "?journal_mode=WAL&busy_timeout=2000&secure_delete=true");
+        registry.add("audit.checkpoint.file", () -> DB_DIR.resolve("checkpoints.jsonl").toString());
     }
 
     protected static final ObjectMapper JSON = new ObjectMapper();
@@ -79,6 +80,11 @@ public abstract class ApiTestBase {
         clock.set(Instant.now());
         jdbc.execute("DROP TABLE IF EXISTS events");   // also drops the guardrail triggers
         jdbc.execute("DROP TABLE IF EXISTS idempotency_keys");
+        try {
+            Files.deleteIfExists(DB_DIR.resolve("checkpoints.jsonl"));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
         store.initSchema();
     }
 
