@@ -7,6 +7,7 @@ import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.time.Clock;
 import java.util.Map;
@@ -32,6 +33,7 @@ public final class RequestGuardFilter extends OncePerRequestFilter {
 
     private static final Logger SECURITY_LOG = LoggerFactory.getLogger("audit.security");
     private static final int MAX_TRACKED_CLIENTS = 10_000;
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     /** Thrown while reading a body that exceeds the limit; mapped to HTTP 413. */
     public static final class BodyTooLarge extends IOException {
@@ -100,10 +102,11 @@ public final class RequestGuardFilter extends OncePerRequestFilter {
         return w.count().incrementAndGet() <= requestsPerMinute;
     }
 
+    /** RFC 7807 body, serialized by Jackson (proper JSON escaping, never hand-built strings). */
     private static void problem(HttpServletResponse response, int status, String detail) throws IOException {
         response.setStatus(status);
         response.setContentType("application/problem+json");
-        response.getWriter().write("{\"status\":" + status + ",\"detail\":\"" + detail + "\"}");
+        JSON.writeValue(response.getOutputStream(), Map.of("status", status, "detail", detail));
     }
 
     /** Counts body bytes as they are read and stops at the limit. */
