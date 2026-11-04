@@ -96,6 +96,18 @@ class IntegrityKeyTest extends ApiTestBase {
     }
 
     @Test
+    void signingKeyPairIsValidatedAtStartup() {
+        String priv = "MC4CAQAwBQYDK2VwBCIEICylBsVmaMj2P0xjmqkQ8V3htmMNx9lm3xV8IhlQloBe";
+        String pub = "MCowBQYDK2VwAyEAuryt9CwSa8oUFMs9PMiN0eTwRbw/GmCQAfjBDxlVep8=";
+        String otherPub = "MCowBQYDK2VwAyEAQW8c0EveU4tXTie4M3QNrV9sGpyW6mqNXgcTb5dGX74=";
+        assertThat(com.audit.chain.SigningKey.of(priv, pub).publicKeyBase64()).isEqualTo(pub);
+        assertThatThrownBy(() -> com.audit.chain.SigningKey.of("", pub)).hasMessageContaining("refuses to start");
+        assertThatThrownBy(() -> com.audit.chain.SigningKey.of(priv, otherPub)).hasMessageContaining("does not match");
+        assertThatThrownBy(() -> com.audit.chain.SigningKey.of("not-base64!", pub)).hasMessageContaining("not valid");
+        assertThat(com.audit.chain.SigningKey.verify(pub, new byte[] {1}, "AAAA")).isFalse();
+    }
+
+    @Test
     void verifierWithoutKeySkipsMacsSoOfflineBundlesStillWork() {
         AuditRecord r = HashChain.build(1, HashChain.GENESIS_HASH, "t", "X_Y", "a", "svc", "r", "1", java.util.Map.of());
         ChainVerifier keyless = new ChainVerifier();

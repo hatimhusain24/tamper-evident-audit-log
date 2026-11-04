@@ -187,6 +187,19 @@ public final class HashChain {
      * records were not altered since export.
      */
     public static VerifyResult verifyBundle(Bundle bundle) {
+        return verifyBundle(bundle, null);
+    }
+
+    /**
+     * As {@link #verifyBundle(Bundle)}, and if {@code publicKey} is given, the bundle must also carry
+     * a valid service signature: then no record can have been added, removed or changed since export.
+     */
+    public static VerifyResult verifyBundle(Bundle bundle, String publicKey) {
+        if (publicKey != null && (bundle.head() == null
+                || !SigningKey.verify(publicKey, bundle.signedBytes(), bundle.signature()))) {
+            return new VerifyResult(false, 0, bundle.head() == null ? 0 : bundle.head().seq(), null, null,
+                    "SIGNATURE_INVALID", "bundle is not signed by the service key, or was changed after export");
+        }
         if (bundle.head() == null || bundle.chain() == null || bundle.records() == null) {
             return new VerifyResult(false, 0, 0, null, null, "MALFORMED_BUNDLE",
                     "bundle must contain head, chain and records");

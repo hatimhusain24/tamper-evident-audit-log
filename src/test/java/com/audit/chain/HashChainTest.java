@@ -186,7 +186,7 @@ class HashChainTest {
 
     @Test
     void bundleWithoutHeadIsMalformedNotACrash() {
-        Bundle b = new Bundle("audit-bundle/v1", "t", "sha256", List.of(), List.of(), null);
+        Bundle b = new Bundle("audit-bundle/v1", "t", "sha256", List.of(), List.of(), null, null);
         assertThat(HashChain.verifyBundle(b).violation()).isEqualTo("MALFORMED_BUNDLE");
     }
 

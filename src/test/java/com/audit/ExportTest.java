@@ -110,6 +110,48 @@ class ExportTest extends ApiTestBase {
         assertThat(HashChain.verifyBundle(b).valid()).isTrue();
     }
 
+    String publicKey() throws Exception {
+        return callAs(null, org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .get("/v1/audit/signing-key")).get("publicKey");
+    }
+
+    @Test
+    void publicSigningKeyIsAvailableWithoutLogin() throws Exception {
+        Response key = callAs(null, org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .get("/v1/audit/signing-key"));
+        assertThat(key.status()).isEqualTo(200);
+        assertThat(key.<String>get("algorithm")).isEqualTo("Ed25519");
+    }
+
+    @Test
+    void signedBundleVerifiesWithThePublicKey() throws Exception {
+        seed(6);
+        Bundle b = bundle(exportFor("actorId", "user-1"));
+        assertThat(b.signature()).isNotBlank();
+        assertThat(HashChain.verifyBundle(b, publicKey()).valid()).isTrue();
+    }
+
+    @Test
+    void droppedRecordIsInvisibleToHashesButBreaksTheSignature() throws Exception {
+        seed(6);
+        Map<String, Object> raw = exportFor("actorId", "user-1");
+        ((List<?>) raw.get("records")).remove(1);                             // silently omit seq 3
+        Bundle b = bundle(raw);
+        assertThat(HashChain.verifyBundle(b).valid()).isTrue();               // hashes alone: fooled
+        var signed = HashChain.verifyBundle(b, publicKey());
+        assertThat(signed.valid()).isFalse();
+        assertThat(signed.violation()).isEqualTo("SIGNATURE_INVALID");
+    }
+
+    @Test
+    void unsignedOrForeignSignedBundleFailsTheSignatureCheck() throws Exception {
+        seed(2);
+        Bundle b = bundle(exportFor("actorId", "user-1"));
+        assertThat(HashChain.verifyBundle(b.withSignature(null), publicKey()).violation()).isEqualTo("SIGNATURE_INVALID");
+        String otherKey = "MCowBQYDK2VwAyEAQW8c0EveU4tXTie4M3QNrV9sGpyW6mqNXgcTb5dGX74=";   // the dev key
+        assertThat(HashChain.verifyBundle(b, otherKey).violation()).isEqualTo("SIGNATURE_INVALID");
+    }
+
     @Test
     void offlineCliVerifiesAndChecksTrustedHead(@TempDir Path dir) throws Exception {
         seed(6);
@@ -123,8 +165,10 @@ class ExportTest extends ApiTestBase {
         System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
         try {
             assertThat(BundleVerifierCli.run(new String[] {"verify-bundle", file.toString()})).isZero();
-            assertThat(BundleVerifierCli.run(new String[] {"verify-bundle", file.toString(), head})).isZero();
-            assertThat(BundleVerifierCli.run(new String[] {"verify-bundle", file.toString(), "f".repeat(64)})).isEqualTo(1);
+            assertThat(BundleVerifierCli.run(new String[] {"verify-bundle", file.toString(), "--head", head})).isZero();
+            assertThat(BundleVerifierCli.run(new String[] {"verify-bundle", file.toString(), "--head", "f".repeat(64)})).isEqualTo(1);
+            assertThat(BundleVerifierCli.run(new String[] {"verify-bundle", file.toString(), "--public-key", publicKey()})).isZero();
+            assertThat(BundleVerifierCli.run(new String[] {"verify-bundle", file.toString(), "--bogus"})).isEqualTo(2);
             assertThat(BundleVerifierCli.run(new String[] {"verify-bundle", dir.resolve("missing.json").toString()})).isEqualTo(2);
             assertThat(BundleVerifierCli.run(new String[] {"verify-bundle"})).isEqualTo(2);
             Path headless = dir.resolve("headless.json");

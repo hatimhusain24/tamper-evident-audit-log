@@ -57,6 +57,7 @@ public class SecurityConfig {
             .httpBasic(basic -> { })
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()   // status only, no details
+                .requestMatchers(HttpMethod.GET, "/v1/audit/signing-key").permitAll()   // a public key
                 .requestMatchers("/docs", "/swagger-ui/**", "/v3/api-docs/**").permitAll() // off in prod
                 .requestMatchers(HttpMethod.POST, "/v1/audit/events").hasRole("WRITER")
                 .requestMatchers(HttpMethod.GET, "/v1/audit/events", "/v1/audit/verify")

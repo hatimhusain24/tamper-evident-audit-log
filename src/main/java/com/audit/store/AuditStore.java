@@ -384,7 +384,7 @@ public final class AuditStore {
         }
         Bundle.Link head = links.isEmpty() ? currentHead() : links.get(links.size() - 1);
         return new Bundle("audit-bundle/v1", iso(clock.instant()),
-                "sha256; record and field hashing as specified in HashChain", records, links, head);
+                "sha256; record and field hashing as specified in HashChain", records, links, head, null);
     }
 
     private Bundle.Link currentHead() {

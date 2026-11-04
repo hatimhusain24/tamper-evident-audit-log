@@ -8,6 +8,7 @@ import com.audit.api.Dtos.RetentionRequest;
 import com.audit.api.Dtos.RetentionResponse;
 import com.audit.chain.Bundle;
 import com.audit.chain.HashChain;
+import com.audit.chain.SigningKey;
 import com.audit.chain.VerifyResult;
 import com.audit.compliance.AccessReport;
 import com.audit.compliance.AccessReportService;
@@ -59,8 +60,9 @@ public final class AuditController {
     private final double retentionDays;
     private final Set<String> sensitiveFields;
     private final MeterRegistry metrics;
+    private final SigningKey signingKey;
 
-    public AuditController(AuditStore store, AccessReportService reports, MeterRegistry metrics,
+    public AuditController(AuditStore store, AccessReportService reports, MeterRegistry metrics, SigningKey signingKey,
                            @Value("${audit.retention-days:2190}") double retentionDays,
                            @Value("${audit.sensitive-fields:}") Set<String> sensitiveFields) {
         if (retentionDays < store.retentionMinDays()) {   // fail fast on an unsafe deployment
@@ -72,6 +74,7 @@ public final class AuditController {
         this.retentionDays = retentionDays;
         this.sensitiveFields = Set.copyOf(sensitiveFields);
         this.metrics = metrics;
+        this.signingKey = signingKey;
     }
 
     /** READERs see sensitive payload fields masked; COMPLIANCE and ADMIN see them in full. */
@@ -179,7 +182,14 @@ public final class AuditController {
         if ((actorId == null) == (resourceId == null)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "provide exactly one of actorId or resourceId");
         }
-        return actorId != null ? store.export(true, actorId) : store.export(false, resourceId);
+        Bundle bundle = actorId != null ? store.export(true, actorId) : store.export(false, resourceId);
+        return bundle.withSignature(signingKey.sign(bundle.signedBytes()));
+    }
+
+    /** The public half of the signing key, so recipients can check bundles and checkpoints offline. */
+    @GetMapping("/audit/signing-key")
+    public Map<String, String> signingKey() {
+        return Map.of("algorithm", SigningKey.ALGORITHM, "publicKey", signingKey.publicKeyBase64());
     }
 
     /**
