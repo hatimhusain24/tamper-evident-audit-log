@@ -37,7 +37,7 @@ class CorruptRecordTest extends ApiTestBase {
     void queriesKeepWorkingWithACorruptRow() throws Exception {
         seed(3);
         tamper("UPDATE events SET payload = '{broken' WHERE seq = 2");
-        Response page = get("/audit/events");
+        Response page = get("/v1/audit/events");
         assertThat(page.status()).isEqualTo(200);
         assertThat(page.items()).extracting(m -> m.get("seq")).containsExactly(1, 2, 3);
         assertThat(page.items().get(1).get("payload")).isNull();
@@ -45,17 +45,17 @@ class CorruptRecordTest extends ApiTestBase {
 
     @Test
     void complianceReportSurvivesACorruptRow() throws Exception {
-        post("/audit/events", Map.of("eventType", "ACCOUNT_VIEWED", "actorId", "emp-1",
+        post("/v1/audit/events", Map.of("eventType", "ACCOUNT_VIEWED", "actorId", "emp-1",
                 "resourceType", "CLIENT_ACCOUNT", "resourceId", "acc-1", "payload", Map.of("purpose", "call")));
         tamper("UPDATE events SET payload = '{broken' WHERE seq = 1");
-        Response r = post("/audit/reports/account-access", Map.of("accountId", "acc-1"));
+        Response r = post("/v1/audit/reports/account-access", Map.of("accountId", "acc-1"));
         assertThat(r.status()).isEqualTo(200);
         assertThat(r.<Map<String, Object>>get("integrity")).containsEntry("violation", "CORRUPT_RECORD");
     }
 
     @Test
     void hugeRetentionWindowIsA400NotA500() throws Exception {
-        assertThat(post("/audit/retention/run", Map.of("olderThanDays", 1e300)).status()).isEqualTo(400);
-        assertThat(post("/audit/retention/run", Map.of("olderThanDays", 36_501)).status()).isEqualTo(400);
+        assertThat(post("/v1/audit/retention/run", Map.of("olderThanDays", 1e300)).status()).isEqualTo(400);
+        assertThat(post("/v1/audit/retention/run", Map.of("olderThanDays", 36_501)).status()).isEqualTo(400);
     }
 }

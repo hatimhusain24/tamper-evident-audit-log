@@ -2,7 +2,7 @@
 
 An append-only audit log. Every record is hash-chained and MAC-signed, so changing, deleting,
 re-ordering, inserting or rewriting history in the data store is **detected** by
-`GET /audit/verify`. Redaction, retention archival, verifiable export and a regulator access
+`GET /v1/audit/verify`. Redaction, retention archival, verifiable export and a regulator access
 report all work **without breaking the chain**. Every endpoint is behind Spring Security with
 role-based access.
 
@@ -31,15 +31,15 @@ Open **http://localhost:8080/docs**, click **Authorize**, and log in as one of t
 
 ## Validate end-to-end (the flow from the brief)
 
-1. As `writer`, `POST /audit/events` (the example body is prefilled) two or three times.
-2. As `reader`, `GET /audit/events?resourceId=acc-1001`: `ssn` and `accountNumber` show as `***`.
-3. As `reader`, `GET /audit/verify` → `"valid": true`. Note `headSeq` and `headHash`.
+1. As `writer`, `POST /v1/audit/events` (the example body is prefilled) two or three times.
+2. As `reader`, `GET /v1/audit/events?resourceId=acc-1001`: `ssn` and `accountNumber` show as `***`.
+3. As `reader`, `GET /v1/audit/verify` → `"valid": true`. Note `headSeq` and `headHash`.
 4. **Tamper** directly in `audit.db`, bypassing the API, with
    [DB Browser for SQLite](https://sqlitebrowser.org) or `sqlite3`:
    ```sql
    UPDATE events SET actor_id = 'mallory' WHERE seq = 2;
    ```
-5. `GET /audit/verify` again → `"valid": false, "firstInvalidSeq": 2, "violation": "HASH_MISMATCH"`.
+5. `GET /v1/audit/verify` again → `"valid": false, "firstInvalidSeq": 2, "violation": "HASH_MISMATCH"`.
 
 All of this, plus a full chain rewrite and tail truncation, runs automatically in the test suite.
 
@@ -47,13 +47,13 @@ All of this, plus a full chain rewrite and tail truncation, runs automatically i
 
 | Method | Path | Role | Purpose |
 |---|---|---|---|
-| `POST` | `/audit/events` | WRITER | Append an event. Optional `Idempotency-Key` header makes retries safe |
-| `GET` | `/audit/events` | READER, COMPLIANCE, ADMIN | Filter by `actorId`, `resourceType`, `resourceId`, `eventType`, `from`/`to`; keyset pagination (`limit`, `cursor`) |
-| `GET` | `/audit/verify` | READER, COMPLIANCE, ADMIN | Walk the chain: `valid`, `firstInvalidSeq`, `violation`, `headHash`. Optional `anchorSeq` + `anchorHash` |
-| `POST` | `/audit/events/{seq}/redactions` | ADMIN | Redact payload fields without breaking the chain |
-| `POST` | `/audit/retention/run` | ADMIN | Archive records older than the window (never below the legal minimum) |
-| `GET` | `/audit/export?actorId=` or `?resourceId=` | COMPLIANCE | Self-verifiable bundle |
-| `POST` | `/audit/reports/account-access` | COMPLIANCE | Scenario C regulator access report |
+| `POST` | `/v1/audit/events` | WRITER | Append an event. Optional `Idempotency-Key` header makes retries safe |
+| `GET` | `/v1/audit/events` | READER, COMPLIANCE, ADMIN | Filter by `actorId`, `resourceType`, `resourceId`, `eventType`, `from`/`to`; keyset pagination (`limit`, `cursor`) |
+| `GET` | `/v1/audit/verify` | READER, COMPLIANCE, ADMIN | Walk the chain: `valid`, `firstInvalidSeq`, `violation`, `headHash`. Optional `anchorSeq` + `anchorHash` |
+| `POST` | `/v1/audit/events/{seq}/redactions` | ADMIN | Redact payload fields without breaking the chain |
+| `POST` | `/v1/audit/retention/run` | ADMIN | Archive records older than the window (never below the legal minimum) |
+| `GET` | `/v1/audit/export?actorId=` or `?resourceId=` | COMPLIANCE | Self-verifiable bundle |
+| `POST` | `/v1/audit/reports/account-access` | COMPLIANCE | Scenario C regulator access report |
 | `GET` | `/actuator/health` | public | Status only (includes a database check) |
 | `GET` | `/actuator/metrics` | ADMIN | Micrometer metrics, e.g. `audit.verify.failures` |
 

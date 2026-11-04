@@ -24,14 +24,14 @@ class FaultInjectionTest extends ApiTestBase {
         String before = jdbc.queryForObject("SELECT payload FROM events WHERE seq = 2", String.class);
         failInsertsOf("RECORD_REDACTED");
 
-        Response res = post("/audit/events/2/redactions", Map.of("fields", List.of("accountNumber"), "reason", "erasure"));
+        Response res = post("/v1/audit/events/2/redactions", Map.of("fields", List.of("accountNumber"), "reason", "erasure"));
         assertThat(res.status()).isEqualTo(500);
         assertThat(res.<String>get("detail")).isEqualTo("internal error");          // no internals leaked
 
         assertThat(jdbc.queryForObject("SELECT payload FROM events WHERE seq = 2", String.class)).isEqualTo(before);
         assertThat(verify().<Boolean>get("valid")).isTrue();                        // nothing half-done
         tamper("DROP TRIGGER inject_fault");
-        assertThat(post("/audit/events/2/redactions", Map.of("fields", List.of("accountNumber"), "reason", "erasure"))
+        assertThat(post("/v1/audit/events/2/redactions", Map.of("fields", List.of("accountNumber"), "reason", "erasure"))
                 .status()).isEqualTo(201);                                          // retry succeeds
     }
 
@@ -48,9 +48,9 @@ class FaultInjectionTest extends ApiTestBase {
     void failedWriteDoesNotConsumeASequenceNumber() throws Exception {
         seed(1);
         failInsertsOf("RECORD_UPDATED");
-        assertThat(post("/audit/events", event(2)).status()).isEqualTo(500);
+        assertThat(post("/v1/audit/events", event(2)).status()).isEqualTo(500);
         tamper("DROP TRIGGER inject_fault");
-        assertThat(post("/audit/events", event(3)).<Integer>get("seq")).isEqualTo(2);  // no gap
+        assertThat(post("/v1/audit/events", event(3)).<Integer>get("seq")).isEqualTo(2);  // no gap
         assertThat(verify().<Boolean>get("valid")).isTrue();
     }
 
@@ -60,7 +60,7 @@ class FaultInjectionTest extends ApiTestBase {
         try (Connection other = DriverManager.getConnection("jdbc:sqlite:" + DB_DIR.resolve("audit.db"));
              Statement st = other.createStatement()) {
             st.execute("BEGIN IMMEDIATE");                                          // external writer
-            var res = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/audit/events")
+            var res = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/v1/audit/events")
                     .contentType(org.springframework.http.MediaType.APPLICATION_JSON).content(JSON.writeValueAsString(event(2)))
                     .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
                             .httpBasic("writer", PASSWORD))).andReturn().getResponse();
@@ -68,7 +68,7 @@ class FaultInjectionTest extends ApiTestBase {
             assertThat(res.getHeader("Retry-After")).isEqualTo("1");
             st.execute("ROLLBACK");
         }
-        assertThat(post("/audit/events", event(2)).status()).isEqualTo(201);       // lock released
+        assertThat(post("/v1/audit/events", event(2)).status()).isEqualTo(201);       // lock released
         assertThat(verify().<Integer>get("recordsChecked")).isEqualTo(2);
     }
 }

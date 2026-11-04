@@ -56,12 +56,12 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()   // status only, no details
                 .requestMatchers("/docs", "/swagger-ui/**", "/v3/api-docs/**").permitAll() // off in prod
-                .requestMatchers(HttpMethod.POST, "/audit/events").hasRole("WRITER")
-                .requestMatchers(HttpMethod.GET, "/audit/events", "/audit/verify")
+                .requestMatchers(HttpMethod.POST, "/v1/audit/events").hasRole("WRITER")
+                .requestMatchers(HttpMethod.GET, "/v1/audit/events", "/v1/audit/verify")
                     .hasAnyRole("READER", "COMPLIANCE", "ADMIN")
-                .requestMatchers(HttpMethod.GET, "/audit/export").hasRole("COMPLIANCE")   // raw PII + salts
-                .requestMatchers(HttpMethod.POST, "/audit/reports/account-access").hasRole("COMPLIANCE")
-                .requestMatchers(HttpMethod.POST, "/audit/events/*/redactions", "/audit/retention/run")
+                .requestMatchers(HttpMethod.GET, "/v1/audit/export").hasRole("COMPLIANCE")   // raw PII + salts
+                .requestMatchers(HttpMethod.POST, "/v1/audit/reports/account-access").hasRole("COMPLIANCE")
+                .requestMatchers(HttpMethod.POST, "/v1/audit/events/*/redactions", "/v1/audit/retention/run")
                     .hasRole("ADMIN")
                 .requestMatchers(HttpMethod.GET, "/actuator/**").hasRole("ADMIN")
                 .anyRequest().denyAll());

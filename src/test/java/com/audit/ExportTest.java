@@ -28,7 +28,7 @@ class ExportTest extends ApiTestBase {
 
     @SuppressWarnings("unchecked")
     Map<String, Object> exportFor(String param, String value) throws Exception {
-        return get("/audit/export", param, value).body();
+        return get("/v1/audit/export", param, value).body();
     }
 
     Bundle bundle(Map<String, Object> raw) {
@@ -66,8 +66,8 @@ class ExportTest extends ApiTestBase {
 
     @Test
     void exactlyOneFilterIsRequired() throws Exception {
-        assertThat(get("/audit/export").status()).isEqualTo(400);
-        assertThat(get("/audit/export", "actorId", "a", "resourceId", "b").status()).isEqualTo(400);
+        assertThat(get("/v1/audit/export").status()).isEqualTo(400);
+        assertThat(get("/v1/audit/export", "actorId", "a", "resourceId", "b").status()).isEqualTo(400);
     }
 
     @SuppressWarnings("unchecked")
@@ -102,9 +102,9 @@ class ExportTest extends ApiTestBase {
     @Test
     void bundleSpanningRedactedAndArchivedHistoryVerifies() throws Exception {
         seed(4);
-        post("/audit/events/3/redactions", Map.of("fields", List.of("accountNumber"), "reason", "erasure"));
+        post("/v1/audit/events/3/redactions", Map.of("fields", List.of("accountNumber"), "reason", "erasure"));
         archiveAfterSevenYears();
-        post("/audit/events", event(7));
+        post("/v1/audit/events", event(7));
         Bundle b = bundle(exportFor("actorId", "user-1"));
         assertThat(b.records()).extracting(r -> r.seq()).containsExactly(7L);
         assertThat(HashChain.verifyBundle(b).valid()).isTrue();

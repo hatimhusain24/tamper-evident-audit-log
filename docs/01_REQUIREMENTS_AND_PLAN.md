@@ -14,15 +14,15 @@ operations: **retention archival** and **field-level redaction**. It must also s
 
 | # | Source requirement | Interpretation / decision |
 |---|---|---|
-| A1 | Write API with eventType, actorId, resourceType, resourceId, payload, timestamp | `POST /audit/events`. Strict validation: eventType `UPPER_SNAKE`, bounded string lengths, payload is a JSON object ≤ 32 KB. |
+| A1 | Write API with eventType, actorId, resourceType, resourceId, payload, timestamp | `POST /v1/audit/events`. Strict validation: eventType `UPPER_SNAKE`, bounded string lengths, payload is a JSON object ≤ 32 KB. |
 | A2 | Timestamp caller- or server-assigned | **Server-assigned**, UTC, microsecond precision, forced monotonic. Callers can't backdate, and log order = time order (time-range queries and retention depend on this). A caller's own "occurred at" can go in `payload`. |
 | A3 | Append-only | The API has no update or delete routes. The storage layer has one insert path. Archival and redaction are separate, explicit admin operations that **append** their own audit event. |
-| A4 | Query by actor / resource / type / time, paginated | `GET /audit/events` with any combination of filters. **Keyset pagination** on `seq` (stable under concurrent appends, O(log n) per page, unlike OFFSET). |
+| A4 | Query by actor / resource / type / time, paginated | `GET /v1/audit/events` with any combination of filters. **Keyset pagination** on `seq` (stable under concurrent appends, O(log n) per page, unlike OFFSET). |
 | A5 | Hash chain | Each record stores `prevHash` and `hash = SHA-256(canonical(content + prevHash))`. Genesis `prevHash` = 64 zeros. |
-| A6 | `GET /audit/verify` | Streams the full chain in O(n) time and O(1) memory (plus redaction bookkeeping). Reports `valid`, first bad `seq`, and a typed `violation`. |
+| A6 | `GET /v1/audit/verify` | Streams the full chain in O(n) time and O(1) memory (plus redaction bookkeeping). Reports `valid`, first bad `seq`, and a typed `violation`. |
 | B1 | Retention: archive/soft-delete old records without false positives | Archival turns old records into **tombstones**: content is purged but `seq/prevHash/hash` stay, so the chain links still verify. A chained `RECORDS_ARCHIVED` event authorizes the range. |
 | B2 | Redaction without breaking the chain | **Per-field salted commitments**: the record hash covers `H(salt‖field)`, not the raw value. Redaction deletes the value and salt and keeps the commitment. A chained `RECORD_REDACTED` event authorizes it. |
-| B3 | Verifiable export bundle | `GET /audit/export` returns the records plus the chain segment that links them. An **offline verifier** (`java -jar audit-log.jar verify-bundle`) needs no access to the service. |
+| B3 | Verifiable export bundle | `GET /v1/audit/export` returns the records plus the chain segment that links them. An **offline verifier** (`java -jar audit-log.jar verify-bundle`) needs no access to the service. |
 | C | "Regulators need to audit access to client account data" | Ambiguous. Clarified in [04_SCENARIO_C_COMPLIANCE.md](04_SCENARIO_C_COMPLIANCE.md) before any code was written. |
 
 ## 3. Ambiguities identified & assumptions

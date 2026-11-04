@@ -23,7 +23,7 @@ class RedactionTest extends ApiTestBase {
 
     @Test
     void redactionKeepsChainValidAndIsLogged() throws Exception {
-        Response res = post("/audit/events/2/redactions", REDACT);
+        Response res = post("/v1/audit/events/2/redactions", REDACT);
         assertThat(res.status()).isEqualTo(201);
         assertThat(res.<String>get("eventType")).isEqualTo("RECORD_REDACTED");
         assertThat(res.<String>get("actorId")).isEqualTo("root");          // the authenticated admin
@@ -31,7 +31,7 @@ class RedactionTest extends ApiTestBase {
         assertThat(res.<Map<String, Object>>get("payload"))
                 .containsEntry("targetSeq", 2).containsEntry("fields", List.of("accountNumber"));
 
-        var record = get("/audit/events", "limit", "1", "cursor", "1").items().get(0);
+        var record = get("/v1/audit/events", "limit", "1", "cursor", "1").items().get(0);
         @SuppressWarnings("unchecked")
         Map<String, Object> payload = (Map<String, Object>) record.get("payload");
         assertThat(payload).containsEntry("accountNumber", "[REDACTED]").containsEntry("n", 2);
@@ -40,7 +40,7 @@ class RedactionTest extends ApiTestBase {
 
     @Test
     void multipleFieldsAndDuplicatesAreHandled() throws Exception {
-        Response res = post("/audit/events/1/redactions", Map.of("fields", List.of("n", "accountNumber", "n"),
+        Response res = post("/v1/audit/events/1/redactions", Map.of("fields", List.of("n", "accountNumber", "n"),
                 "reason", "erasure"));
         assertThat(res.<Map<String, Object>>get("payload")).containsEntry("fields", List.of("accountNumber", "n"));
         assertThat(verify().<Boolean>get("valid")).isTrue();
@@ -48,7 +48,7 @@ class RedactionTest extends ApiTestBase {
 
     @Test
     void redactedValueIsGoneFromRawDatabaseFiles() throws Exception {
-        post("/audit/events/2/redactions", REDACT);
+        post("/v1/audit/events/2/redactions", REDACT);
         try (Stream<Path> files = Files.list(DB_DIR)) {
             for (Path file : files.filter(f -> f.getFileName().toString().startsWith("audit.db")).toList()) {
                 assertThat(new String(Files.readAllBytes(file), java.nio.charset.StandardCharsets.ISO_8859_1))
@@ -64,17 +64,17 @@ class RedactionTest extends ApiTestBase {
 
     @Test
     void errorCases() throws Exception {
-        assertThat(post("/audit/events/99/redactions", REDACT).status()).isEqualTo(404);
-        assertThat(post("/audit/events/2/redactions", Map.of("fields", List.of("nope"), "reason", "abc")).status()).isEqualTo(409);
-        assertThat(post("/audit/events/2/redactions", Map.of("fields", List.of(), "reason", "abc")).status()).isEqualTo(400);
-        assertThat(post("/audit/events/2/redactions", Map.of("fields", List.of("n"), "reason", "")).status()).isEqualTo(400);
+        assertThat(post("/v1/audit/events/99/redactions", REDACT).status()).isEqualTo(404);
+        assertThat(post("/v1/audit/events/2/redactions", Map.of("fields", List.of("nope"), "reason", "abc")).status()).isEqualTo(409);
+        assertThat(post("/v1/audit/events/2/redactions", Map.of("fields", List.of(), "reason", "abc")).status()).isEqualTo(400);
+        assertThat(post("/v1/audit/events/2/redactions", Map.of("fields", List.of("n"), "reason", "")).status()).isEqualTo(400);
     }
 
     @Test
     void doubleRedactionAndSystemEventsAreRejected() throws Exception {
-        post("/audit/events/2/redactions", REDACT);
-        assertThat(post("/audit/events/2/redactions", REDACT).status()).isEqualTo(409);
-        assertThat(post("/audit/events/4/redactions", Map.of("fields", List.of("reason"), // seq 4 = RECORD_REDACTED
+        post("/v1/audit/events/2/redactions", REDACT);
+        assertThat(post("/v1/audit/events/2/redactions", REDACT).status()).isEqualTo(409);
+        assertThat(post("/v1/audit/events/4/redactions", Map.of("fields", List.of("reason"), // seq 4 = RECORD_REDACTED
                 "reason", "abc")).status()).isEqualTo(409);
     }
 
@@ -89,7 +89,7 @@ class RedactionTest extends ApiTestBase {
 
     @Test
     void editingTheRedactionEventItselfIsDetected() throws Exception {
-        post("/audit/events/2/redactions", REDACT);
+        post("/v1/audit/events/2/redactions", REDACT);
         tamper("UPDATE events SET payload = json_set(payload, '$.reason', 'nothing to see') WHERE seq = 4");
         assertThat(verify().<String>get("violation")).isEqualTo("PAYLOAD_TAMPERED");
     }

@@ -35,18 +35,20 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Append-only audit API. There is deliberately no update or delete endpoint. Who may call what
+ * Append-only audit API, versioned under /v1. There is deliberately no update or delete endpoint. Who may call what
  * is decided in SecurityConfig; this class only uses the authenticated name for attribution.
  * Every POST requires application/json: a cross-site HTML form cannot send it, which is the CSRF
  * defence for this stateless API.
  */
 @RestController
+@RequestMapping("/v1")
 public final class AuditController {
 
     static final int MAX_PAYLOAD_BYTES = 32 * 1024;

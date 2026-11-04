@@ -16,7 +16,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 class IdempotencyTest extends ApiTestBase {
 
     Response write(String user, String key, Map<String, Object> body) throws Exception {
-        var request = MockMvcRequestBuilders.post("/audit/events").contentType(MediaType.APPLICATION_JSON)
+        var request = MockMvcRequestBuilders.post("/v1/audit/events").contentType(MediaType.APPLICATION_JSON)
                 .content(JSON.writeValueAsString(body));
         if (key != null) {
             request.header("Idempotency-Key", key);

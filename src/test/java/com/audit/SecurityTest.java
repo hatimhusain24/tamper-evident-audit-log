@@ -27,14 +27,14 @@ class SecurityTest extends ApiTestBase {
     /** One valid request per protected endpoint (fresh builder each time). */
     static MockHttpServletRequestBuilder request(String endpoint) throws Exception {
         return switch (endpoint) {
-            case "write" -> json(MockMvcRequestBuilders.post("/audit/events"), event(1));
-            case "query" -> MockMvcRequestBuilders.get("/audit/events");
-            case "verify" -> MockMvcRequestBuilders.get("/audit/verify");
-            case "export" -> MockMvcRequestBuilders.get("/audit/export").param("actorId", "user-1");
-            case "report" -> json(MockMvcRequestBuilders.post("/audit/reports/account-access"), Map.of());
-            case "redact" -> json(MockMvcRequestBuilders.post("/audit/events/1/redactions"),
+            case "write" -> json(MockMvcRequestBuilders.post("/v1/audit/events"), event(1));
+            case "query" -> MockMvcRequestBuilders.get("/v1/audit/events");
+            case "verify" -> MockMvcRequestBuilders.get("/v1/audit/verify");
+            case "export" -> MockMvcRequestBuilders.get("/v1/audit/export").param("actorId", "user-1");
+            case "report" -> json(MockMvcRequestBuilders.post("/v1/audit/reports/account-access"), Map.of());
+            case "redact" -> json(MockMvcRequestBuilders.post("/v1/audit/events/1/redactions"),
                     Map.of("fields", List.of("n"), "reason", "erasure"));
-            case "retention" -> json(MockMvcRequestBuilders.post("/audit/retention/run"), Map.of());
+            case "retention" -> json(MockMvcRequestBuilders.post("/v1/audit/retention/run"), Map.of());
             default -> throw new IllegalArgumentException(endpoint);
         };
     }
@@ -77,11 +77,11 @@ class SecurityTest extends ApiTestBase {
 
     @Test
     void wrongPasswordAndUnknownUserAreRejected() throws Exception {
-        var wrong = MockMvcRequestBuilders.get("/audit/verify").with(
+        var wrong = MockMvcRequestBuilders.get("/v1/audit/verify").with(
                 org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
                         .httpBasic("reader", "wrong-password"));
         assertThat(mvc.perform(wrong).andReturn().getResponse().getStatus()).isEqualTo(401);
-        var unknown = MockMvcRequestBuilders.get("/audit/verify").with(
+        var unknown = MockMvcRequestBuilders.get("/v1/audit/verify").with(
                 org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
                         .httpBasic("mallory", PASSWORD));
         assertThat(mvc.perform(unknown).andReturn().getResponse().getStatus()).isEqualTo(401);
@@ -94,6 +94,12 @@ class SecurityTest extends ApiTestBase {
         assertThat(health.<String>get("status")).isEqualTo("UP");
         assertThat(health.body()).doesNotContainKey("components");          // no internals leaked
         assertThat(callAs("admin", MockMvcRequestBuilders.get("/anything-else")).status()).isEqualTo(403);
+    }
+
+    @Test
+    void unversionedPathsNoLongerExist() throws Exception {
+        assertThat(callAs("admin", MockMvcRequestBuilders.get("/audit/verify")).status()).isIn(403, 404);
+        assertThat(callAs("reader", MockMvcRequestBuilders.get("/v1/audit/verify")).status()).isEqualTo(200);
     }
 
     @Test
@@ -123,7 +129,7 @@ class SecurityTest extends ApiTestBase {
 
         Map<String, Object> spoof = new java.util.LinkedHashMap<>(event(2));
         spoof.put("recordedBy", "system:retention");                      // not a request field
-        assertThat(callAs("writer", json(MockMvcRequestBuilders.post("/audit/events"), spoof)).status()).isEqualTo(400);
+        assertThat(callAs("writer", json(MockMvcRequestBuilders.post("/v1/audit/events"), spoof)).status()).isEqualTo(400);
     }
 
     @Test
@@ -131,7 +137,7 @@ class SecurityTest extends ApiTestBase {
         for (String type : List.of("RECORD_REDACTED", "RECORDS_ARCHIVED", "COMPLIANCE_REPORT_GENERATED")) {
             Map<String, Object> e = new java.util.LinkedHashMap<>(event(1));
             e.put("eventType", type);
-            assertThat(callAs("writer", json(MockMvcRequestBuilders.post("/audit/events"), e)).status())
+            assertThat(callAs("writer", json(MockMvcRequestBuilders.post("/v1/audit/events"), e)).status())
                     .as(type).isEqualTo(400);
         }
     }
@@ -146,23 +152,23 @@ class SecurityTest extends ApiTestBase {
 
     @Test
     void readersSeeSensitiveFieldsMaskedComplianceSeesThem() throws Exception {
-        post("/audit/events", Map.of("eventType", "ACCOUNT_VIEWED", "actorId", "emp-1", "resourceType", "CLIENT_ACCOUNT",
+        post("/v1/audit/events", Map.of("eventType", "ACCOUNT_VIEWED", "actorId", "emp-1", "resourceType", "CLIENT_ACCOUNT",
                 "resourceId", "acc-1", "payload", Map.of("ssn", "123-45-6789", "purpose", "call")));
 
-        var asReader = callAs("reader", MockMvcRequestBuilders.get("/audit/events")).items().get(0);
+        var asReader = callAs("reader", MockMvcRequestBuilders.get("/v1/audit/events")).items().get(0);
         assertThat(payloadOf(asReader)).containsEntry("ssn", "***").containsEntry("purpose", "call");
-        var asCompliance = callAs("compliance", MockMvcRequestBuilders.get("/audit/events")).items().get(0);
+        var asCompliance = callAs("compliance", MockMvcRequestBuilders.get("/v1/audit/events")).items().get(0);
         assertThat(payloadOf(asCompliance)).containsEntry("ssn", "123-45-6789");
-        assertThat(callAs("reader", MockMvcRequestBuilders.get("/audit/verify")).<Boolean>get("valid")).isTrue();
+        assertThat(callAs("reader", MockMvcRequestBuilders.get("/v1/audit/verify")).<Boolean>get("valid")).isTrue();
     }
 
     @Test
     void crossSiteFormPostsAreRefused() throws Exception {
         seed(2);
-        var form = MockMvcRequestBuilders.post("/audit/retention/run")
+        var form = MockMvcRequestBuilders.post("/v1/audit/retention/run")
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED).content("olderThanDays=2190");
         assertThat(callAs("admin", form).status()).isEqualTo(415);
-        var textPlain = MockMvcRequestBuilders.post("/audit/events").contentType(MediaType.TEXT_PLAIN)
+        var textPlain = MockMvcRequestBuilders.post("/v1/audit/events").contentType(MediaType.TEXT_PLAIN)
                 .content(JSON.writeValueAsString(event(3)));
         assertThat(callAs("writer", textPlain).status()).isEqualTo(415);
     }

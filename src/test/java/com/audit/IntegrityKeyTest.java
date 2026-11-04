@@ -56,7 +56,7 @@ class IntegrityKeyTest extends ApiTestBase {
         tamper("DELETE FROM events WHERE seq >= 4");
         assertThat(verify().<Boolean>get("valid")).isTrue();               // no anchor: undetectable
 
-        Response anchored = get("/audit/verify", "anchorSeq", anchorSeq, "anchorHash", anchorHash);
+        Response anchored = get("/v1/audit/verify", "anchorSeq", anchorSeq, "anchorHash", anchorHash);
         assertThat(anchored.<Boolean>get("valid")).isFalse();
         assertThat(anchored.<String>get("violation")).isEqualTo("ANCHOR_MISMATCH");
         assertThat(anchored.<Integer>get("firstInvalidSeq")).isEqualTo(4);
@@ -68,17 +68,17 @@ class IntegrityKeyTest extends ApiTestBase {
         Response head = verify();
         String seq = String.valueOf(head.<Integer>get("headSeq"));
         seed(2);                                                           // log keeps growing
-        assertThat(get("/audit/verify", "anchorSeq", seq, "anchorHash", head.get("headHash"))
+        assertThat(get("/v1/audit/verify", "anchorSeq", seq, "anchorHash", head.get("headHash"))
                 .<Boolean>get("valid")).isTrue();
-        assertThat(get("/audit/verify", "anchorSeq", seq, "anchorHash", "a".repeat(64))
+        assertThat(get("/v1/audit/verify", "anchorSeq", seq, "anchorHash", "a".repeat(64))
                 .<String>get("violation")).isEqualTo("ANCHOR_MISMATCH");
     }
 
     @Test
     void anchorParametersAreValidated() throws Exception {
-        assertThat(get("/audit/verify", "anchorSeq", "3").status()).isEqualTo(400);
-        assertThat(get("/audit/verify", "anchorSeq", "3", "anchorHash", "not-a-hash").status()).isEqualTo(400);
-        assertThat(get("/audit/verify", "anchorSeq", "0", "anchorHash", "a".repeat(64)).status()).isEqualTo(400);
+        assertThat(get("/v1/audit/verify", "anchorSeq", "3").status()).isEqualTo(400);
+        assertThat(get("/v1/audit/verify", "anchorSeq", "3", "anchorHash", "not-a-hash").status()).isEqualTo(400);
+        assertThat(get("/v1/audit/verify", "anchorSeq", "0", "anchorHash", "a".repeat(64)).status()).isEqualTo(400);
     }
 
     @Test

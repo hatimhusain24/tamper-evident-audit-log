@@ -16,7 +16,7 @@ class RetentionTest extends ApiTestBase {
     @Test
     void defaultWindowKeepsRecentRecords() throws Exception {
         seed(3);
-        Response res = call(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/audit/retention/run")
+        Response res = call(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/v1/audit/retention/run")
                 .contentType(org.springframework.http.MediaType.APPLICATION_JSON));
         assertThat(res.<Integer>get("archivedCount")).isZero();      // 6-year default, no body needed
         assertThat(res.body().get("event")).isNull();
@@ -38,8 +38,8 @@ class RetentionTest extends ApiTestBase {
         Map<String, Object> event = (Map<String, Object>) res.body().get("event");
         assertThat(event).containsEntry("eventType", "RECORDS_ARCHIVED").containsEntry("seq", 4);
 
-        assertThat(get("/audit/events").items()).extracting(m -> m.get("seq")).containsExactly(4);
-        post("/audit/events", event(9));                                   // chain continues
+        assertThat(get("/v1/audit/events").items()).extracting(m -> m.get("seq")).containsExactly(4);
+        post("/v1/audit/events", event(9));                                   // chain continues
         Response v = verify();
         assertThat(v.<Boolean>get("valid")).isTrue();
         assertThat(v.<Integer>get("recordsChecked")).isEqualTo(5);
@@ -48,7 +48,7 @@ class RetentionTest extends ApiTestBase {
     @Test
     void repeatedRunsAndRedactedRecordsStayValid() throws Exception {
         seed(3);
-        post("/audit/events/1/redactions", Map.of("fields", List.of("accountNumber"), "reason", "erasure"));
+        post("/v1/audit/events/1/redactions", Map.of("fields", List.of("accountNumber"), "reason", "erasure"));
         archiveAll();
         seed(2);
         archiveAll();
@@ -61,29 +61,29 @@ class RetentionTest extends ApiTestBase {
     void archivedRecordCannotBeRedacted() throws Exception {
         seed(2);
         archiveAll();
-        assertThat(post("/audit/events/1/redactions", Map.of("fields", List.of("n"), "reason", "abc")).status()).isEqualTo(409);
+        assertThat(post("/v1/audit/events/1/redactions", Map.of("fields", List.of("n"), "reason", "abc")).status()).isEqualTo(409);
     }
 
     @Test
     void negativeWindowIsRejected() throws Exception {
-        assertThat(post("/audit/retention/run", Map.of("olderThanDays", -1)).status()).isEqualTo(400);
+        assertThat(post("/v1/audit/retention/run", Map.of("olderThanDays", -1)).status()).isEqualTo(400);
     }
 
     @Test
     void windowBelowTheLegalMinimumIsRejected() throws Exception {
         seed(5);
-        Response res = post("/audit/retention/run", Map.of("olderThanDays", 0));
+        Response res = post("/v1/audit/retention/run", Map.of("olderThanDays", 0));
         assertThat(res.status()).isEqualTo(400);
         assertThat(res.<String>get("detail")).contains("2190");
-        assertThat(get("/audit/events").items()).hasSize(5);                // nothing purged
-        assertThat(post("/audit/retention/run", Map.of("olderThanDays", 2189.9)).status()).isEqualTo(400);
+        assertThat(get("/v1/audit/events").items()).hasSize(5);                // nothing purged
+        assertThat(post("/v1/audit/retention/run", Map.of("olderThanDays", 2189.9)).status()).isEqualTo(400);
     }
 
     @Test
     void recordsYoungerThanTheMinimumAreNeverArchived() throws Exception {
         seed(3);
         clock.advanceDays(5 * 365);                                        // only 5 years later
-        assertThat(post("/audit/retention/run", Map.of("olderThanDays", 2190)).<Integer>get("archivedCount")).isZero();
+        assertThat(post("/v1/audit/retention/run", Map.of("olderThanDays", 2190)).<Integer>get("archivedCount")).isZero();
     }
 
     @Test

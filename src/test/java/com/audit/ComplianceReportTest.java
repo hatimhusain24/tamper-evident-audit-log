@@ -17,7 +17,7 @@ class ComplianceReportTest extends ApiTestBase {
         if (purpose != null) {
             payload.put("purpose", purpose);
         }
-        post("/audit/events", Map.of("eventType", action, "actorId", actor, "resourceType", "CLIENT_ACCOUNT",
+        post("/v1/audit/events", Map.of("eventType", action, "actorId", actor, "resourceType", "CLIENT_ACCOUNT",
                 "resourceId", account, "payload", payload));
     }
 
@@ -26,7 +26,7 @@ class ComplianceReportTest extends ApiTestBase {
         access("ACCOUNT_UPDATED", "emp-2", "acc-1", "address change");
         access("ACCOUNT_VIEWED", "emp-1", "acc-2", "client call");
         access("ACCOUNT_EXPORTED", "emp-3", "acc-1", null);
-        post("/audit/events", Map.of("eventType", "USER_LOGIN", "actorId", "emp-1", "resourceType", "SESSION",
+        post("/v1/audit/events", Map.of("eventType", "USER_LOGIN", "actorId", "emp-1", "resourceType", "SESSION",
                 "resourceId", "s1"));
     }
 
@@ -37,7 +37,7 @@ class ComplianceReportTest extends ApiTestBase {
             body.put(params[i], params[i + 1]);
         }
         return callAs("compliance", org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                .post("/audit/reports/account-access").contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .post("/v1/audit/reports/account-access").contentType(org.springframework.http.MediaType.APPLICATION_JSON)
                 .content(JSON.writeValueAsString(body)));
     }
 
@@ -58,7 +58,7 @@ class ComplianceReportTest extends ApiTestBase {
     void allAccountsAndTimeRange() throws Exception {
         seedAccesses();
         assertThat(report().<Map<String, Object>>get("summary")).containsEntry("totalAccesses", 4);
-        var events = get("/audit/events", "resourceType", "CLIENT_ACCOUNT").items();
+        var events = get("/v1/audit/events", "resourceType", "CLIENT_ACCOUNT").items();
         Response r = report("from", (String) events.get(1).get("timestamp"), "to", (String) events.get(3).get("timestamp"));
         assertThat(r.<List<Map<String, Object>>>get("accesses")).extracting(a -> a.get("seq")).containsExactly(2, 3);
     }
@@ -80,7 +80,7 @@ class ComplianceReportTest extends ApiTestBase {
         body.remove("reportEvent");
         assertThat(r.<String>get("reportDigest")).isEqualTo(HashChain.sha256(HashChain.canonical(body)));
 
-        var logged = get("/audit/events", "eventType", "COMPLIANCE_REPORT_GENERATED").items();
+        var logged = get("/v1/audit/events", "eventType", "COMPLIANCE_REPORT_GENERATED").items();
         assertThat(logged).hasSize(1);
         assertThat(logged.get(0)).containsEntry("actorId", "compliance").containsEntry("recordedBy", "compliance");
         @SuppressWarnings("unchecked")
@@ -101,7 +101,7 @@ class ComplianceReportTest extends ApiTestBase {
     void reportIsGeneratedByTheAuthenticatedUserAndNeedsNoBody() throws Exception {
         seedAccesses();
         Response r = callAs("compliance", org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                .post("/audit/reports/account-access").contentType(org.springframework.http.MediaType.APPLICATION_JSON));
+                .post("/v1/audit/reports/account-access").contentType(org.springframework.http.MediaType.APPLICATION_JSON));
         assertThat(r.status()).isEqualTo(200);
         assertThat(r.<String>get("generatedBy")).isEqualTo("compliance");
     }
@@ -109,6 +109,6 @@ class ComplianceReportTest extends ApiTestBase {
     @Test
     void reportIsNotAvailableAsAGet() throws Exception {
         assertThat(callAs("compliance", org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                .get("/audit/reports/account-access")).status()).isIn(403, 405);
+                .get("/v1/audit/reports/account-access")).status()).isIn(403, 405);
     }
 }

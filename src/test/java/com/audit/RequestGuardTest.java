@@ -23,7 +23,7 @@ class RequestGuardTest extends ApiTestBase {
     void oversizedBodyIsRefusedBeforeParsing() throws Exception {
         freshWindow();
         String huge = "{\"x\":\"" + "a".repeat(5 * 1024 * 1024) + "\"}";   // 5 MB, probe P7
-        var request = MockMvcRequestBuilders.post("/audit/events").contentType(MediaType.APPLICATION_JSON).content(huge);
+        var request = MockMvcRequestBuilders.post("/v1/audit/events").contentType(MediaType.APPLICATION_JSON).content(huge);
         assertThat(callAs("writer", request).status()).isEqualTo(413);
     }
 
@@ -31,7 +31,7 @@ class RequestGuardTest extends ApiTestBase {
     void bodyJustOverTheLimitIsRefused() throws Exception {
         freshWindow();
         String body = "{\"x\":\"" + "a".repeat(65_536) + "\"}";
-        var request = MockMvcRequestBuilders.post("/audit/events").contentType(MediaType.APPLICATION_JSON).content(body);
+        var request = MockMvcRequestBuilders.post("/v1/audit/events").contentType(MediaType.APPLICATION_JSON).content(body);
         assertThat(callAs("writer", request).status()).isEqualTo(413);
     }
 
@@ -39,15 +39,15 @@ class RequestGuardTest extends ApiTestBase {
     void floodFromOneClientGets429WithRetryAfter() throws Exception {
         freshWindow();
         for (int i = 0; i < 5; i++) {
-            assertThat(callAs("reader", MockMvcRequestBuilders.get("/audit/verify")).status()).isEqualTo(200);
+            assertThat(callAs("reader", MockMvcRequestBuilders.get("/v1/audit/verify")).status()).isEqualTo(200);
         }
-        var sixth = mvc.perform(MockMvcRequestBuilders.get("/audit/verify")
+        var sixth = mvc.perform(MockMvcRequestBuilders.get("/v1/audit/verify")
                 .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
                         .httpBasic("reader", PASSWORD))).andReturn().getResponse();
         assertThat(sixth.getStatus()).isEqualTo(429);
         assertThat(sixth.getHeader("Retry-After")).isEqualTo("60");
         clock.advanceDays(1);                                              // next window: allowed again
-        assertThat(callAs("reader", MockMvcRequestBuilders.get("/audit/verify")).status()).isEqualTo(200);
+        assertThat(callAs("reader", MockMvcRequestBuilders.get("/v1/audit/verify")).status()).isEqualTo(200);
     }
 
     @Test
@@ -55,7 +55,7 @@ class RequestGuardTest extends ApiTestBase {
         freshWindow();
         int last = 0;
         for (int i = 0; i < 6; i++) {
-            last = mvc.perform(MockMvcRequestBuilders.get("/audit/verify")
+            last = mvc.perform(MockMvcRequestBuilders.get("/v1/audit/verify")
                     .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
                             .httpBasic("admin", "guess-" + i))).andReturn().getResponse().getStatus();
         }
@@ -65,9 +65,9 @@ class RequestGuardTest extends ApiTestBase {
     @Test
     void normalWritesStillWork() throws Exception {
         freshWindow();
-        assertThat(callAs("writer", MockMvcRequestBuilders.post("/audit/events").contentType(MediaType.APPLICATION_JSON)
+        assertThat(callAs("writer", MockMvcRequestBuilders.post("/v1/audit/events").contentType(MediaType.APPLICATION_JSON)
                 .content(JSON.writeValueAsString(event(1)))).status()).isEqualTo(201);
-        assertThat(callAs("writer", MockMvcRequestBuilders.post("/audit/events").contentType(MediaType.APPLICATION_JSON)
+        assertThat(callAs("writer", MockMvcRequestBuilders.post("/v1/audit/events").contentType(MediaType.APPLICATION_JSON)
                 .content(JSON.writeValueAsString(Map.of("eventType", "lowercase")))).status()).isEqualTo(400);
     }
 }

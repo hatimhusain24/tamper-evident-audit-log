@@ -34,7 +34,7 @@ system to be buildable and testable:
 1. Only `CLIENT_ACCOUNT` events in scope; filters by account and `[from, to)`.
 2. Reads (e.g. `ACCOUNT_VIEWED`) and writes are both included. Payload contents are not exposed.
 3. Accesses missing `payload.purpose` appear in `exceptions`.
-4. `integrity` reflects `GET /audit/verify`. A tampered log makes the report say so.
+4. `integrity` reflects `GET /v1/audit/verify`. A tampered log makes the report say so.
 5. A `COMPLIANCE_REPORT_GENERATED` event is appended with requester, scope and `reportDigest`,
    and `reportDigest == sha256(canonical(report without reportEvent))`.
 6. Only the COMPLIANCE role can generate reports, and the generator is the authenticated user
@@ -52,7 +52,7 @@ Applications that touch client account data emit:
 
 ## 4. Design
 
-`POST /audit/reports/account-access` with body `{"accountId", "from", "to"}` (all optional), role
+`POST /v1/audit/reports/account-access` with body `{"accountId", "from", "to"}` (all optional), role
 COMPLIANCE. It is a POST because generating a report writes a chained event.
 
 1. Run full chain verification and put the result in `integrity`.

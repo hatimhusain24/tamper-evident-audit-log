@@ -4,8 +4,8 @@
 
 ```
             ┌────────────── api/AuditController (Spring MVC, @RestController) ─────────────┐
- HTTP ───▶  │ POST /audit/events   GET /audit/events   GET /audit/verify   GET /audit/export │
-            │ POST …/redactions 🔒  POST /audit/retention/run 🔒  GET …/account-access 🔒     │
+ HTTP ───▶  │ POST /v1/audit/events   GET /v1/audit/events   GET /v1/audit/verify   GET /v1/audit/export │
+            │ POST …/redactions 🔒  POST /v1/audit/retention/run 🔒  GET …/account-access 🔒     │
             └──────┬──────────────────────────┬──────────────────────────┬──────────────────┘
                    │ validated by             │ persists via             │ Scenario C
             api/EventRequest, Dtos     store/AuditStore (SQLite)  compliance/AccessReportService

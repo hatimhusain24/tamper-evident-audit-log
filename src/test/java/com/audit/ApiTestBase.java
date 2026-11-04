@@ -141,7 +141,7 @@ public abstract class ApiTestBase {
     protected List<Response> seed(int n) throws Exception {
         List<Response> out = new java.util.ArrayList<>();
         for (int i = 1; i <= n; i++) {
-            out.add(post("/audit/events", event(i)));
+            out.add(post("/v1/audit/events", event(i)));
         }
         return out;
     }
@@ -149,10 +149,10 @@ public abstract class ApiTestBase {
     /** Move time past the legal minimum, then archive everything older than it. */
     protected Response archiveAfterSevenYears() throws Exception {
         clock.advanceDays(SEVEN_YEARS);
-        return post("/audit/retention/run", Map.of("olderThanDays", 2190));
+        return post("/v1/audit/retention/run", Map.of("olderThanDays", 2190));
     }
 
     protected Response verify() throws Exception {
-        return get("/audit/verify");
+        return get("/v1/audit/verify");
     }
 }

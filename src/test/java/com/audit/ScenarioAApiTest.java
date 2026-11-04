@@ -37,7 +37,7 @@ class ScenarioAApiTest extends ApiTestBase {
     void payloadIsOptional() throws Exception {
         Map<String, Object> e = event(1);
         e.remove("payload");
-        assertThat(post("/audit/events", e).status()).isEqualTo(201);
+        assertThat(post("/v1/audit/events", e).status()).isEqualTo(201);
         assertThat(verify().<Boolean>get("valid")).isTrue();
     }
 
@@ -58,13 +58,13 @@ class ScenarioAApiTest extends ApiTestBase {
     void invalidEventsAreRejected(String name, Map<String, Object> override) throws Exception {
         Map<String, Object> e = event(1);
         e.putAll(override);
-        assertThat(post("/audit/events", e).status()).isEqualTo(400);
+        assertThat(post("/v1/audit/events", e).status()).isEqualTo(400);
         assertThat(verify().<Integer>get("recordsChecked")).isZero();
     }
 
     @Test
     void malformedJsonIsRejected() throws Exception {
-        var request = org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/audit/events")
+        var request = org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/v1/audit/events")
                 .contentType(MediaType.APPLICATION_JSON).content("{not json");
         assertThat(call(request).status()).isEqualTo(400);
     }
@@ -72,27 +72,27 @@ class ScenarioAApiTest extends ApiTestBase {
     @Test
     void noUpdateOrDeleteRoutes() throws Exception {
         seed(1);
-        assertThat(call(put("/audit/events/1")).status()).isIn(403, 404, 405);
-        assertThat(call(patch("/audit/events/1")).status()).isIn(403, 404, 405);
-        assertThat(call(delete("/audit/events/1")).status()).isIn(403, 404, 405);
+        assertThat(call(put("/v1/audit/events/1")).status()).isIn(403, 404, 405);
+        assertThat(call(patch("/v1/audit/events/1")).status()).isIn(403, 404, 405);
+        assertThat(call(delete("/v1/audit/events/1")).status()).isIn(403, 404, 405);
     }
 
     @Test
     void filtersCombine() throws Exception {
         seed(6);
-        var items = get("/audit/events", "actorId", "user-1", "resourceType", "ACCOUNT", "resourceId", "acc-1").items();
+        var items = get("/v1/audit/events", "actorId", "user-1", "resourceType", "ACCOUNT", "resourceId", "acc-1").items();
         assertThat(items).extracting(m -> m.get("seq")).containsExactly(1);
-        assertThat(get("/audit/events", "eventType", "USER_LOGIN").items()).isEmpty();
-        assertThat(get("/audit/events", "resourceId", "acc-0").items()).extracting(m -> m.get("seq")).containsExactly(3, 6);
+        assertThat(get("/v1/audit/events", "eventType", "USER_LOGIN").items()).isEmpty();
+        assertThat(get("/v1/audit/events", "resourceId", "acc-0").items()).extracting(m -> m.get("seq")).containsExactly(3, 6);
     }
 
     @Test
     void timeRangeIsFromInclusiveToExclusive() throws Exception {
         List<Response> r = seed(4);
-        var items = get("/audit/events", "from", r.get(1).get("timestamp"), "to", r.get(3).get("timestamp")).items();
+        var items = get("/v1/audit/events", "from", r.get(1).get("timestamp"), "to", r.get(3).get("timestamp")).items();
         assertThat(items).extracting(m -> m.get("seq")).containsExactly(2, 3);
         // inverted range returns nothing rather than an error
-        assertThat(get("/audit/events", "from", r.get(3).get("timestamp"), "to", r.get(0).get("timestamp")).items()).isEmpty();
+        assertThat(get("/v1/audit/events", "from", r.get(3).get("timestamp"), "to", r.get(0).get("timestamp")).items()).isEmpty();
     }
 
     @Test
@@ -101,20 +101,20 @@ class ScenarioAApiTest extends ApiTestBase {
         List<Object> seen = new ArrayList<>();
         Object cursor = 0;
         while (cursor != null) {
-            Response page = get("/audit/events", "limit", "3", "cursor", String.valueOf(cursor));
+            Response page = get("/v1/audit/events", "limit", "3", "cursor", String.valueOf(cursor));
             page.items().forEach(m -> seen.add(m.get("seq")));
             cursor = page.get("nextCursor");
         }
         assertThat(seen).containsExactly(1, 2, 3, 4, 5, 6, 7);
-        assertThat(get("/audit/events", "cursor", "99").items()).isEmpty();
+        assertThat(get("/v1/audit/events", "cursor", "99").items()).isEmpty();
     }
 
     @Test
     void paginationLimitsAreEnforced() throws Exception {
-        assertThat(get("/audit/events", "limit", "0").status()).isEqualTo(400);
-        assertThat(get("/audit/events", "limit", "501").status()).isEqualTo(400);
-        assertThat(get("/audit/events", "cursor", "-1").status()).isEqualTo(400);
-        assertThat(get("/audit/events", "from", "not-a-date").status()).isEqualTo(400);
+        assertThat(get("/v1/audit/events", "limit", "0").status()).isEqualTo(400);
+        assertThat(get("/v1/audit/events", "limit", "501").status()).isEqualTo(400);
+        assertThat(get("/v1/audit/events", "cursor", "-1").status()).isEqualTo(400);
+        assertThat(get("/v1/audit/events", "from", "not-a-date").status()).isEqualTo(400);
     }
 
     @Test
@@ -179,7 +179,7 @@ class ScenarioAApiTest extends ApiTestBase {
         List<Future<Response>> futures = new ArrayList<>();
         for (int i = 0; i < 80; i++) {
             int n = i;
-            futures.add(pool.submit(() -> post("/audit/events", event(n))));
+            futures.add(pool.submit(() -> post("/v1/audit/events", event(n))));
         }
         for (Future<Response> f : futures) {
             assertThat(f.get().status()).isEqualTo(201);

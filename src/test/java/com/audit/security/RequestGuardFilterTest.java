@@ -13,7 +13,7 @@ class RequestGuardFilterTest {
 
     /** A chunked request: the body is there, but its length is not declared. */
     static MockHttpServletRequest chunked(int bytes) {
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/audit/events") {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/v1/audit/events") {
             @Override
             public long getContentLengthLong() {
                 return -1;
