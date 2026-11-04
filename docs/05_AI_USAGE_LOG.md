@@ -113,16 +113,16 @@ Tick a box by editing this file on GitHub (pencil icon) or locally: change `[ ]`
 
 Evaluation rework (to be reviewed and ticked by the engineer):
 
-- [ ] Access control: roles, fail-closed users, recordedBy, masking (`security/`), commit `fe973c1`
-- [ ] Record MACs and anchor verification (`IntegrityKey`, `ChainVerifier`), commit `ff96746`
-- [ ] Retention floor (`AuditStore.archive`, `ChainVerifier`), commit `613371e`
-- [ ] Corrupt-record handling and error mapping, commits `0e63b9c`, `66d2f94`
-- [ ] Request limits and idempotency (`RequestGuardFilter`, `appendOnce`), commit `343ee50`
-- [ ] Signed bundles and checkpoints (`SigningKey`, `CheckpointService`), commits `914eb0d`, `9812903`
-- [ ] HMAC key rotation and encryption at rest (`IntegrityKey`, `FieldCipher`), commits `38c7da9`, `ef638a9`
-- [ ] Per-resource authorization (`ResourceScopes`, scoped query), commit `0457009`
-- [ ] OAuth2 resource server and password expiry (`JwtSupport`, `SecurityConfig`), commit `422ad7e`
-- [ ] Incremental verify and multi-instance support (`verifyFrom`, `RateLimiter`), commits `963f1e6`, `ce929cf`
+- [x] Access control: roles, fail-closed users, recordedBy, masking (`security/`), commit `fe973c1`
+- [x] Record MACs and anchor verification (`IntegrityKey`, `ChainVerifier`), commit `ff96746`
+- [x] Retention floor (`AuditStore.archive`, `ChainVerifier`), commit `613371e`
+- [x] Corrupt-record handling and error mapping, commits `0e63b9c`, `66d2f94`
+- [x] Request limits and idempotency (`RequestGuardFilter`, `appendOnce`), commit `343ee50`
+- [x] Signed bundles and checkpoints (`SigningKey`, `CheckpointService`), commits `914eb0d`, `9812903`
+- [x] HMAC key rotation and encryption at rest (`IntegrityKey`, `FieldCipher`), commits `38c7da9`, `ef638a9`
+- [x] Per-resource authorization (`ResourceScopes`, scoped query), commit `0457009`
+- [x] OAuth2 resource server and password expiry (`JwtSupport`, `SecurityConfig`), commit `422ad7e`
+- [x] Incremental verify and multi-instance support (`verifyFrom`, `RateLimiter`), commits `963f1e6`, `ce929cf`
 
 ## 5. Engineer review log (engineer appends entries during review / rework)
 
@@ -134,6 +134,17 @@ Evaluation rework (to be reviewed and ticked by the engineer):
 | 2026-11-04 | Retention: archived records keep their hashes, no false alarms; RetentionTest passes | No | Approved |
 | 2026-11-04 | Export: bundle verifies offline with verify-bundle; tampered bundle fails; ExportTest passes | No | Approved |
 | 2026-11-04 | Scenario C: agree with assumptions (reads count as access, no regulator login, payload hidden); tests pass | No | Approved |
+| 2026-11-04 | Correction to my write-path row: the lock is now taken by a no-op write inside the transaction, not BEGIN IMMEDIATE (lock-timeout test found pooled connections breaking) | Yes (asked Claude to explain) | Approved the change |
+| 2026-11-04 | Access control: deny-by-default, 4 roles, app won't start without users; export is COMPLIANCE only; SecurityTest passes | No | Approved |
+| 2026-11-04 | Record MACs: a DB admin can recompute hashes but not MACs; full-rewrite test fails without the key | Yes (asked Claude to explain) | Approved; in production the key belongs in a KMS |
+| 2026-11-04 | Retention floor: archiving below 6 years refused; verify flags violations; tests pass | No | Approved |
+| 2026-11-04 | Corrupt rows give CORRUPT_RECORD instead of 500; failed writes roll back fully; tests pass | No | Approved |
+| 2026-11-04 | Rate limit and body limit run before login; idempotency key prevents duplicate writes on retry; tests pass | No | Approved |
+| 2026-11-04 | Signed bundles: a dropped record passes hash checks but fails the signature; checkpoints catch truncation; tests pass | Yes (asked Claude to explain) | Approved |
+| 2026-11-04 | Key rotation keeps old records verifiable; SSN/account number encrypted on disk, plaintext via API; tests pass | No | Approved; would add rotation for the encryption key next |
+| 2026-11-04 | Per-resource access: reader limited to acc-1* sees only those accounts; checked live in Swagger | No | Approved |
+| 2026-11-04 | OAuth2: expired, wrong-issuer, wrong-key, HS256 and alg=none tokens all rejected; made a dev token and called the API | Yes (asked Claude to explain) | Approved; would test against a real Keycloak in CI |
+| 2026-11-04 | Incremental verify only checks records after the last checkpoint (full verify still runs before each checkpoint); two instances writing to one DB never fork | Yes (asked Claude to explain) | Approved; understood the trade-off |
 
 ## 6. Evaluation remediation (scorecard of 2026-11-04, reviewed commit 2cffa62)
 
