@@ -72,9 +72,9 @@ class ScenarioAApiTest extends ApiTestBase {
     @Test
     void noUpdateOrDeleteRoutes() throws Exception {
         seed(1);
-        assertThat(call(put("/audit/events/1")).status()).isIn(404, 405);
-        assertThat(call(patch("/audit/events/1")).status()).isIn(404, 405);
-        assertThat(call(delete("/audit/events/1")).status()).isIn(404, 405);
+        assertThat(call(put("/audit/events/1")).status()).isIn(403, 404, 405);
+        assertThat(call(patch("/audit/events/1")).status()).isIn(403, 404, 405);
+        assertThat(call(delete("/audit/events/1")).status()).isIn(403, 404, 405);
     }
 
     @Test

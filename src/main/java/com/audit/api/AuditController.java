@@ -3,37 +3,42 @@ package com.audit.api;
 import com.audit.api.Dtos.EventPage;
 import com.audit.api.Dtos.EventView;
 import com.audit.api.Dtos.RedactionRequest;
+import com.audit.api.Dtos.ReportRequest;
 import com.audit.api.Dtos.RetentionRequest;
 import com.audit.api.Dtos.RetentionResponse;
 import com.audit.chain.Bundle;
 import com.audit.chain.HashChain;
 import com.audit.chain.VerifyResult;
+import com.audit.compliance.AccessReport;
 import com.audit.compliance.AccessReportService;
 import com.audit.store.AuditStore;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-/** Append-only audit API. There is deliberately no update or delete endpoint. */
+/**
+ * Append-only audit API. There is deliberately no update or delete endpoint. Who may call what
+ * is decided in SecurityConfig; this class only uses the authenticated name for attribution.
+ * Every POST requires application/json: a cross-site HTML form cannot send it, which is the CSRF
+ * defence for this stateless API.
+ */
 @RestController
 public final class AuditController {
 
@@ -41,28 +46,27 @@ public final class AuditController {
 
     private final AuditStore store;
     private final AccessReportService reports;
-    private final byte[] adminKey;
     private final double retentionDays;
+    private final Set<String> sensitiveFields;
 
     public AuditController(AuditStore store, AccessReportService reports,
-                           @Value("${audit.admin-key:}") String adminKey,
-                           @Value("${audit.retention-days:2190}") double retentionDays) {
+                           @Value("${audit.retention-days:2190}") double retentionDays,
+                           @Value("${audit.sensitive-fields:}") Set<String> sensitiveFields) {
         if (retentionDays < store.retentionMinDays()) {   // fail fast on an unsafe deployment
             throw new IllegalStateException("audit.retention-days (" + retentionDays
                     + ") is below audit.retention-min-days (" + store.retentionMinDays() + ")");
         }
         this.store = store;
         this.reports = reports;
-        this.adminKey = adminKey.getBytes(StandardCharsets.UTF_8);
         this.retentionDays = retentionDays;
+        this.sensitiveFields = Set.copyOf(sensitiveFields);
     }
 
-    /** High-impact operations (redaction, archival, reports) need the admin key when one is set. */
-    private void requireAdmin(String key) {
-        if (adminKey.length > 0 && (key == null
-                || !MessageDigest.isEqual(adminKey, key.getBytes(StandardCharsets.UTF_8)))) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "valid X-Admin-Key header required");
-        }
+    /** READERs see sensitive payload fields masked; COMPLIANCE and ADMIN see them in full. */
+    private Set<String> maskFor(Authentication auth) {
+        boolean privileged = auth.getAuthorities().stream().anyMatch(a ->
+                a.getAuthority().equals("ROLE_COMPLIANCE") || a.getAuthority().equals("ROLE_ADMIN"));
+        return privileged ? Set.of() : sensitiveFields;
     }
 
     @GetMapping("/health")
@@ -70,10 +74,10 @@ public final class AuditController {
         return Map.of("status", "ok");
     }
 
-    @PostMapping("/audit/events")
+    @PostMapping(value = "/audit/events", consumes = MediaType.APPLICATION_JSON_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
-    public EventView write(@Valid @RequestBody EventRequest event) {
-        if (HashChain.REDACTION_EVENT.equals(event.eventType()) || HashChain.ARCHIVE_EVENT.equals(event.eventType())) {
+    public EventView write(@Valid @RequestBody EventRequest event, Authentication auth) {
+        if (HashChain.SYSTEM_EVENTS.contains(event.eventType())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     event.eventType() + " is a reserved system event type");
         }
@@ -81,8 +85,8 @@ public final class AuditController {
         if (HashChain.canonical(payload).length > MAX_PAYLOAD_BYTES) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "payload exceeds " + MAX_PAYLOAD_BYTES + " bytes");
         }
-        return EventView.of(store.append(event.eventType(), event.actorId(), event.resourceType(),
-                event.resourceId(), payload));
+        return EventView.of(store.append(event.eventType(), event.actorId(), auth.getName(),
+                event.resourceType(), event.resourceId(), payload));
     }
 
     @GetMapping("/audit/events")
@@ -94,14 +98,16 @@ public final class AuditController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
             @RequestParam(defaultValue = "50") @Min(1) @Max(500) int limit,
-            @RequestParam(defaultValue = "0") @Min(0) long cursor) {
+            @RequestParam(defaultValue = "0") @Min(0) long cursor,
+            Authentication auth) {
         Map<String, String> filters = new HashMap<>();
         filters.put("actorId", actorId);
         filters.put("resourceType", resourceType);
         filters.put("resourceId", resourceId);
         filters.put("eventType", eventType);
         AuditStore.Page page = store.query(filters, from, to, limit, cursor);
-        return new EventPage(page.items().stream().map(EventView::of).toList(), page.nextCursor());
+        Set<String> mask = maskFor(auth);
+        return new EventPage(page.items().stream().map(r -> EventView.of(r, mask)).toList(), page.nextCursor());
     }
 
     /** Walks the full chain: valid, first bad seq and violation type, plus head to anchor. */
@@ -110,22 +116,17 @@ public final class AuditController {
         return store.verify();
     }
 
-    @PostMapping("/audit/events/{seq}/redactions")
+    @PostMapping(value = "/audit/events/{seq}/redactions", consumes = MediaType.APPLICATION_JSON_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
-    public EventView redact(@PathVariable long seq,
-                            @RequestHeader(value = "X-Admin-Key", required = false) String key,
-                            @Valid @RequestBody RedactionRequest body) {
-        requireAdmin(key);
-        return EventView.of(store.redact(seq, body.fields(), body.reason(), body.requestedBy()));
+    public EventView redact(@PathVariable long seq, @Valid @RequestBody RedactionRequest body, Authentication auth) {
+        return EventView.of(store.redact(seq, body.fields(), body.reason(), auth.getName()));
     }
 
-    @PostMapping("/audit/retention/run")
-    public RetentionResponse runRetention(@RequestHeader(value = "X-Admin-Key", required = false) String key,
-                                          @Valid @RequestBody(required = false) RetentionRequest body) {
-        requireAdmin(key);
+    @PostMapping(value = "/audit/retention/run", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public RetentionResponse runRetention(@Valid @RequestBody(required = false) RetentionRequest body,
+                                          Authentication auth) {
         double days = body == null || body.olderThanDays() == null ? retentionDays : body.olderThanDays();
-        String by = body == null || body.requestedBy() == null ? "system:retention" : body.requestedBy();
-        AuditStore.RetentionResult result = store.archive(days, by);
+        AuditStore.RetentionResult result = store.archive(days, auth.getName());
         return new RetentionResponse(result.archivedCount(), result.throughSeq(), EventView.of(result.event()));
     }
 
@@ -139,15 +140,14 @@ public final class AuditController {
         return actorId != null ? store.export(true, actorId) : store.export(false, resourceId);
     }
 
-    /** Scenario C: who accessed client account data, when and why, with integrity proof. */
-    @GetMapping("/audit/reports/account-access")
-    public Map<String, Object> accountAccessReport(
-            @RequestHeader(value = "X-Admin-Key", required = false) String key,
-            @RequestParam @NotBlank @Size(max = 128) String requestedBy,
-            @RequestParam(required = false) String accountId,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
-        requireAdmin(key);
-        return reports.accessReport(accountId, from, to, requestedBy);
+    /**
+     * Scenario C: who accessed client account data, when and why, with integrity proof. A POST,
+     * because generating a report is itself recorded in the chain.
+     */
+    @PostMapping(value = "/audit/reports/account-access", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public AccessReport accountAccessReport(@Valid @RequestBody(required = false) ReportRequest body,
+                                            Authentication auth) {
+        ReportRequest scope = body == null ? new ReportRequest(null, null, null) : body;
+        return reports.accessReport(scope.accountId(), scope.from(), scope.to(), auth.getName());
     }
 }

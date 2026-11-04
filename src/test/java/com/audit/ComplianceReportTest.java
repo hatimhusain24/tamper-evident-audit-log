@@ -30,12 +30,15 @@ class ComplianceReportTest extends ApiTestBase {
                 "resourceId", "s1"));
     }
 
+    /** POST a report as the compliance user; params are key/value pairs of the scope. */
     Response report(String... params) throws Exception {
-        String[] all = new String[params.length + 2];
-        all[0] = "requestedBy";
-        all[1] = "compliance-1";
-        System.arraycopy(params, 0, all, 2, params.length);
-        return get("/audit/reports/account-access", all);
+        Map<String, Object> body = new HashMap<>();
+        for (int i = 0; i < params.length; i += 2) {
+            body.put(params[i], params[i + 1]);
+        }
+        return callAs("compliance", org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .post("/audit/reports/account-access").contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(JSON.writeValueAsString(body)));
     }
 
     @Test
@@ -79,7 +82,7 @@ class ComplianceReportTest extends ApiTestBase {
 
         var logged = get("/audit/events", "eventType", "COMPLIANCE_REPORT_GENERATED").items();
         assertThat(logged).hasSize(1);
-        assertThat(logged.get(0)).containsEntry("actorId", "compliance-1");
+        assertThat(logged.get(0)).containsEntry("actorId", "compliance").containsEntry("recordedBy", "compliance");
         @SuppressWarnings("unchecked")
         Map<String, Object> payload = (Map<String, Object>) logged.get(0).get("payload");
         assertThat(payload).containsEntry("reportDigest", r.get("reportDigest"));
@@ -95,8 +98,17 @@ class ComplianceReportTest extends ApiTestBase {
     }
 
     @Test
-    void requestedByIsMandatory() throws Exception {
-        assertThat(get("/audit/reports/account-access").status()).isEqualTo(400);
-        assertThat(get("/audit/reports/account-access", "requestedBy", " ").status()).isEqualTo(400);
+    void reportIsGeneratedByTheAuthenticatedUserAndNeedsNoBody() throws Exception {
+        seedAccesses();
+        Response r = callAs("compliance", org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .post("/audit/reports/account-access").contentType(org.springframework.http.MediaType.APPLICATION_JSON));
+        assertThat(r.status()).isEqualTo(200);
+        assertThat(r.<String>get("generatedBy")).isEqualTo("compliance");
+    }
+
+    @Test
+    void reportIsNotAvailableAsAGet() throws Exception {
+        assertThat(callAs("compliance", org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .get("/audit/reports/account-access")).status()).isIn(403, 405);
     }
 }

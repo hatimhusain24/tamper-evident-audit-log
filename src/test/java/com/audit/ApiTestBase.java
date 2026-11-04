@@ -20,10 +20,12 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
@@ -31,7 +33,11 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(ApiTestBase.ClockConfig.class)
+@ActiveProfiles("test")
 public abstract class ApiTestBase {
+
+    /** Every test user has this password (see application-test.properties). */
+    protected static final String PASSWORD = "test-pass";
 
     /** Days that safely exceed the 6-year legal retention minimum. */
     protected static final long SEVEN_YEARS = 7 * 365;
@@ -92,7 +98,16 @@ public abstract class ApiTestBase {
         }
     }
 
+    /** Calls as "root", a test user holding every role, so functional tests focus on behaviour. */
     protected Response call(MockHttpServletRequestBuilder request) throws Exception {
+        return callAs("root", request);
+    }
+
+    /** Calls as a given user; null means no credentials at all. */
+    protected Response callAs(String user, MockHttpServletRequestBuilder request) throws Exception {
+        if (user != null) {
+            request.with(SecurityMockMvcRequestPostProcessors.httpBasic(user, PASSWORD));
+        }
         MvcResult result = mvc.perform(request).andReturn();
         String text = result.getResponse().getContentAsString();
         @SuppressWarnings("unchecked")
@@ -133,7 +148,7 @@ public abstract class ApiTestBase {
     /** Move time past the legal minimum, then archive everything older than it. */
     protected Response archiveAfterSevenYears() throws Exception {
         clock.advanceDays(SEVEN_YEARS);
-        return post("/audit/retention/run", Map.of("olderThanDays", 2190, "requestedBy", "ops-1"));
+        return post("/audit/retention/run", Map.of("olderThanDays", 2190));
     }
 
     protected Response verify() throws Exception {

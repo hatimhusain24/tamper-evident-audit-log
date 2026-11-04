@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 class RedactionTest extends ApiTestBase {
 
     static final Map<String, Object> REDACT = Map.of(
-            "fields", List.of("accountNumber"), "reason", "GDPR erasure #77", "requestedBy", "dpo-1");
+            "fields", List.of("accountNumber"), "reason", "GDPR erasure #77");
 
     @BeforeEach
     void seedThree() throws Exception {
@@ -26,7 +26,8 @@ class RedactionTest extends ApiTestBase {
         Response res = post("/audit/events/2/redactions", REDACT);
         assertThat(res.status()).isEqualTo(201);
         assertThat(res.<String>get("eventType")).isEqualTo("RECORD_REDACTED");
-        assertThat(res.<String>get("actorId")).isEqualTo("dpo-1");
+        assertThat(res.<String>get("actorId")).isEqualTo("root");          // the authenticated admin
+        assertThat(res.<String>get("recordedBy")).isEqualTo("root");
         assertThat(res.<Map<String, Object>>get("payload"))
                 .containsEntry("targetSeq", 2).containsEntry("fields", List.of("accountNumber"));
 
@@ -40,7 +41,7 @@ class RedactionTest extends ApiTestBase {
     @Test
     void multipleFieldsAndDuplicatesAreHandled() throws Exception {
         Response res = post("/audit/events/1/redactions", Map.of("fields", List.of("n", "accountNumber", "n"),
-                "reason", "erasure", "requestedBy", "dpo"));
+                "reason", "erasure"));
         assertThat(res.<Map<String, Object>>get("payload")).containsEntry("fields", List.of("accountNumber", "n"));
         assertThat(verify().<Boolean>get("valid")).isTrue();
     }
@@ -64,12 +65,9 @@ class RedactionTest extends ApiTestBase {
     @Test
     void errorCases() throws Exception {
         assertThat(post("/audit/events/99/redactions", REDACT).status()).isEqualTo(404);
-        assertThat(post("/audit/events/2/redactions", Map.of("fields", List.of("nope"), "reason", "abc",
-                "requestedBy", "x")).status()).isEqualTo(409);
-        assertThat(post("/audit/events/2/redactions", Map.of("fields", List.of(), "reason", "abc",
-                "requestedBy", "x")).status()).isEqualTo(400);
-        assertThat(post("/audit/events/2/redactions", Map.of("fields", List.of("n"), "reason", "",
-                "requestedBy", "x")).status()).isEqualTo(400);
+        assertThat(post("/audit/events/2/redactions", Map.of("fields", List.of("nope"), "reason", "abc")).status()).isEqualTo(409);
+        assertThat(post("/audit/events/2/redactions", Map.of("fields", List.of(), "reason", "abc")).status()).isEqualTo(400);
+        assertThat(post("/audit/events/2/redactions", Map.of("fields", List.of("n"), "reason", "")).status()).isEqualTo(400);
     }
 
     @Test
@@ -77,7 +75,7 @@ class RedactionTest extends ApiTestBase {
         post("/audit/events/2/redactions", REDACT);
         assertThat(post("/audit/events/2/redactions", REDACT).status()).isEqualTo(409);
         assertThat(post("/audit/events/4/redactions", Map.of("fields", List.of("reason"), // seq 4 = RECORD_REDACTED
-                "reason", "abc", "requestedBy", "x")).status()).isEqualTo(409);
+                "reason", "abc")).status()).isEqualTo(409);
     }
 
     @Test

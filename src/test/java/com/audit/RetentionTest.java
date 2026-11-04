@@ -16,7 +16,8 @@ class RetentionTest extends ApiTestBase {
     @Test
     void defaultWindowKeepsRecentRecords() throws Exception {
         seed(3);
-        Response res = call(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/audit/retention/run"));
+        Response res = call(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/audit/retention/run")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON));
         assertThat(res.<Integer>get("archivedCount")).isZero();      // 6-year default, no body needed
         assertThat(res.body().get("event")).isNull();
     }
@@ -47,8 +48,7 @@ class RetentionTest extends ApiTestBase {
     @Test
     void repeatedRunsAndRedactedRecordsStayValid() throws Exception {
         seed(3);
-        post("/audit/events/1/redactions", Map.of("fields", List.of("accountNumber"), "reason", "erasure",
-                "requestedBy", "dpo"));
+        post("/audit/events/1/redactions", Map.of("fields", List.of("accountNumber"), "reason", "erasure"));
         archiveAll();
         seed(2);
         archiveAll();
@@ -61,8 +61,7 @@ class RetentionTest extends ApiTestBase {
     void archivedRecordCannotBeRedacted() throws Exception {
         seed(2);
         archiveAll();
-        assertThat(post("/audit/events/1/redactions", Map.of("fields", List.of("n"), "reason", "abc",
-                "requestedBy", "x")).status()).isEqualTo(409);
+        assertThat(post("/audit/events/1/redactions", Map.of("fields", List.of("n"), "reason", "abc")).status()).isEqualTo(409);
     }
 
     @Test
@@ -73,7 +72,7 @@ class RetentionTest extends ApiTestBase {
     @Test
     void windowBelowTheLegalMinimumIsRejected() throws Exception {
         seed(5);
-        Response res = post("/audit/retention/run", Map.of("olderThanDays", 0, "requestedBy", "attacker"));
+        Response res = post("/audit/retention/run", Map.of("olderThanDays", 0));
         assertThat(res.status()).isEqualTo(400);
         assertThat(res.<String>get("detail")).contains("2190");
         assertThat(get("/audit/events").items()).hasSize(5);                // nothing purged

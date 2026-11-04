@@ -2,12 +2,12 @@ package com.audit.compliance;
 
 import com.audit.chain.AuditRecord;
 import com.audit.chain.HashChain;
+import com.audit.compliance.AccessReport.Access;
 import com.audit.store.AuditStore;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -18,7 +18,6 @@ import org.springframework.stereotype.Service;
 public class AccessReportService {
 
     static final String ACCOUNT_RESOURCE = "CLIENT_ACCOUNT";
-    static final String REPORT_EVENT = "COMPLIANCE_REPORT_GENERATED";
 
     private final AuditStore store;
     private final Clock clock;
@@ -28,10 +27,10 @@ public class AccessReportService {
         this.clock = clock;
     }
 
-    public Map<String, Object> accessReport(String accountId, Instant from, Instant to, String requestedBy) {
+    public AccessReport accessReport(String accountId, Instant from, Instant to, String requestedBy) {
         var integrity = store.verify();
 
-        List<Map<String, Object>> accesses = new ArrayList<>();
+        List<Access> accesses = new ArrayList<>();
         Map<String, String> filters = new HashMap<>();
         filters.put("resourceType", ACCOUNT_RESOURCE);
         filters.put("resourceId", accountId);
@@ -45,48 +44,31 @@ public class AccessReportService {
         Map<String, Long> byAction = new TreeMap<>();
         Map<String, Long> byActor = new TreeMap<>();
         accesses.forEach(a -> {
-            byAction.merge((String) a.get("action"), 1L, Long::sum);
-            byActor.merge((String) a.get("actorId"), 1L, Long::sum);
+            byAction.merge(a.action(), 1L, Long::sum);
+            byActor.merge(a.actorId(), 1L, Long::sum);
         });
-        Map<String, Object> scope = new LinkedHashMap<>();
-        scope.put("resourceType", ACCOUNT_RESOURCE);
-        scope.put("accountId", accountId);
-        scope.put("from", from == null ? null : AuditStore.iso(from));
-        scope.put("to", to == null ? null : AuditStore.iso(to));
+        var scope = new AccessReport.Scope(ACCOUNT_RESOURCE, accountId,
+                from == null ? null : AuditStore.iso(from), to == null ? null : AuditStore.iso(to));
+        var body = new AccessReport.Body(scope, AuditStore.iso(clock.instant()), requestedBy, integrity,
+                new AccessReport.Summary(accesses.size(), byActor.size(), byAction, byActor),
+                accesses.stream().filter(a -> a.purpose() == null).map(Access::seq).toList(), accesses);
 
-        Map<String, Object> report = new LinkedHashMap<>();
-        report.put("scope", scope);
-        report.put("generatedAt", AuditStore.iso(clock.instant()));
-        report.put("generatedBy", requestedBy);
-        report.put("integrity", integrity);
-        report.put("summary", Map.of("totalAccesses", accesses.size(),
-                "distinctActors", byActor.size(),
-                "byAction", byAction, "byActor", byActor));
-        report.put("exceptions", accesses.stream().filter(a -> a.get("purpose") == null)
-                .map(a -> a.get("seq")).toList());
-        report.put("accesses", accesses);
-
-        String digest = HashChain.sha256(HashChain.canonical(report));
-        AuditRecord event = store.append(REPORT_EVENT, requestedBy, "COMPLIANCE_REPORT",   // audit the auditors
-                accountId == null ? "*" : accountId,
-                Map.of("scope", scope, "accessCount", accesses.size(), "reportDigest", digest));
-        report.put("reportDigest", digest);
-        report.put("reportEvent", Map.of("seq", event.seq(), "hash", event.hash()));
-        return report;
+        String digest = HashChain.sha256(HashChain.canonical(body));
+        Map<String, Object> scopeMap = new HashMap<>();   // Map.of() rejects null scope values
+        scopeMap.put("accountId", accountId);
+        scopeMap.put("from", scope.from());
+        scopeMap.put("to", scope.to());
+        AuditRecord event = store.append(HashChain.REPORT_EVENT, requestedBy, requestedBy, // audit the auditors
+                "COMPLIANCE_REPORT", accountId == null ? "*" : accountId,
+                Map.of("scope", scopeMap, "accessCount", accesses.size(), "reportDigest", digest));
+        return new AccessReport(body.scope(), body.generatedAt(), body.generatedBy(), body.integrity(),
+                body.summary(), body.exceptions(), body.accesses(), digest,
+                new AccessReport.EventRef(event.seq(), event.hash()));
     }
 
-    /** Data minimization: access metadata only, never payload contents. */
-    private static Map<String, Object> access(AuditRecord e) {
-        Map<String, Object> a = new LinkedHashMap<>();
-        a.put("seq", e.seq());
-        a.put("timestamp", e.timestamp());
-        a.put("actorId", e.actorId());
-        a.put("action", e.eventType());
-        a.put("accountId", e.resourceId());
+    private static Access access(AuditRecord e) {
         Map<String, Object> payload = e.payload() == null ? Map.of() : e.payload();   // corrupt row
-        a.put("purpose", payload.get("purpose"));
-        a.put("channel", payload.get("channel"));
-        a.put("hash", e.hash());
-        return a;
+        return new Access(e.seq(), e.timestamp(), e.actorId(), e.recordedBy(), e.eventType(), e.resourceId(),
+                payload.get("purpose"), payload.get("channel"), e.hash());
     }
 }

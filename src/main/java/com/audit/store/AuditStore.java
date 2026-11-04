@@ -80,6 +80,7 @@ public final class AuditStore {
                 timestamp     TEXT    NOT NULL,
                 event_type    TEXT,
                 actor_id      TEXT,
+                recorded_by   TEXT,             -- authenticated submitter, inside the hash
                 resource_type TEXT,
                 resource_id   TEXT,
                 payload       TEXT,             -- JSON object; redacted fields hold "[REDACTED]"
@@ -101,8 +102,8 @@ public final class AuditStore {
             BEFORE UPDATE OF seq, timestamp, prev_hash, hash ON events
             BEGIN SELECT RAISE(ABORT, 'chain columns are immutable'); END""");
 
-    private static final String COLUMNS = "seq, timestamp, event_type, actor_id, resource_type, "
-            + "resource_id, payload, salts, field_hashes, prev_hash, hash, archived";
+    private static final String COLUMNS = "seq, timestamp, event_type, actor_id, recorded_by, "
+            + "resource_type, resource_id, payload, salts, field_hashes, prev_hash, hash, archived";
     private static final String SELECT = "SELECT " + COLUMNS + " FROM events";
     private static final Map<String, String> FILTERS = Map.of(   // API name -> column (whitelist)
             "actorId", "actor_id", "resourceType", "resource_type",
@@ -152,12 +153,12 @@ public final class AuditStore {
         }
     }
 
-    public AuditRecord append(String eventType, String actorId, String resourceType,
+    public AuditRecord append(String eventType, String actorId, String recordedBy, String resourceType,
                               String resourceId, Map<String, Object> payload) {
-        return write(() -> appendInTx(eventType, actorId, resourceType, resourceId, payload));
+        return write(() -> appendInTx(eventType, actorId, recordedBy, resourceType, resourceId, payload));
     }
 
-    private AuditRecord appendInTx(String eventType, String actorId, String resourceType,
+    private AuditRecord appendInTx(String eventType, String actorId, String recordedBy, String resourceType,
                                    String resourceId, Map<String, Object> payload) {
         Head head = jdbc.query("SELECT seq, hash, timestamp FROM events ORDER BY seq DESC LIMIT 1",
                 (ResultSetExtractor<Head>) rs -> rs.next()
@@ -167,10 +168,10 @@ public final class AuditStore {
         String now = iso(clock.instant());
         // keep timestamps monotonic even if the wall clock steps back
         String timestamp = head != null && now.compareTo(head.timestamp()) < 0 ? head.timestamp() : now;
-        AuditRecord r = HashChain.build(seq + 1, prev, timestamp, eventType, actorId, resourceType,
-                resourceId, payload);
-        jdbc.update("INSERT INTO events (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                r.seq(), r.timestamp(), r.eventType(), r.actorId(), r.resourceType(), r.resourceId(),
+        AuditRecord r = HashChain.build(seq + 1, prev, timestamp, eventType, actorId, recordedBy,
+                resourceType, resourceId, payload);
+        jdbc.update("INSERT INTO events (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                r.seq(), r.timestamp(), r.eventType(), r.actorId(), r.recordedBy(), r.resourceType(), r.resourceId(),
                 toJson(r.payload()), toJson(r.salts()), toJson(r.fieldHashes()), r.prevHash(), r.hash(), 0);
         return r;
     }
@@ -183,8 +184,7 @@ public final class AuditStore {
     public AuditRecord redact(long seq, List<String> fields, String reason, String requestedBy) {
         AuditRecord event = write(() -> {
             AuditRecord r = find(seq);
-            if (r.archived() || HashChain.REDACTION_EVENT.equals(r.eventType())
-                    || HashChain.ARCHIVE_EVENT.equals(r.eventType())) {
+            if (r.archived() || HashChain.SYSTEM_EVENTS.contains(r.eventType())) {
                 throw new Conflict("archived records and system events cannot be redacted");
             }
             List<String> unknown = fields.stream().filter(f -> !r.payload().containsKey(f)).sorted().toList();
@@ -203,7 +203,7 @@ public final class AuditStore {
             });
             jdbc.update("UPDATE events SET payload = ?, salts = ? WHERE seq = ?",
                     toJson(payload), toJson(salts), seq);
-            return appendInTx(HashChain.REDACTION_EVENT, requestedBy, "AUDIT_EVENT", String.valueOf(seq),
+            return appendInTx(HashChain.REDACTION_EVENT, requestedBy, requestedBy, "AUDIT_EVENT", String.valueOf(seq),
                     Map.of("targetSeq", seq, "fields", targets, "reason", reason));
         });
         writeLock.lock();   // flush the WAL so the old value is not left in the -wal file
@@ -237,10 +237,10 @@ public final class AuditStore {
             if (pending == 0) {
                 return new RetentionResult(0, through, null);
             }
-            jdbc.update("UPDATE events SET archived = 1, event_type = NULL, actor_id = NULL, "
+            jdbc.update("UPDATE events SET archived = 1, event_type = NULL, actor_id = NULL, recorded_by = NULL, "
                     + "resource_type = NULL, resource_id = NULL, payload = NULL, salts = NULL, "
                     + "field_hashes = NULL WHERE seq <= ? AND archived = 0", through);
-            AuditRecord event = appendInTx(HashChain.ARCHIVE_EVENT, requestedBy, "AUDIT_LOG", "retention",
+            AuditRecord event = appendInTx(HashChain.ARCHIVE_EVENT, requestedBy, requestedBy, "AUDIT_LOG", "retention",
                     Map.of("throughSeq", through, "cutoff", cutoff, "count", pending,
                             "olderThanDays", olderThanDays));
             return new RetentionResult(pending, through, event);
@@ -334,7 +334,7 @@ public final class AuditStore {
 
     private AuditRecord toRecord(ResultSet rs) throws SQLException {
         return new AuditRecord(rs.getLong("seq"), rs.getString("timestamp"), rs.getString("event_type"),
-                rs.getString("actor_id"), rs.getString("resource_type"), rs.getString("resource_id"),
+                rs.getString("actor_id"), rs.getString("recorded_by"), rs.getString("resource_type"), rs.getString("resource_id"),
                 fromJson(rs.getString("payload"), OBJECT_MAP), fromJson(rs.getString("salts"), STRING_MAP),
                 fromJson(rs.getString("field_hashes"), STRING_MAP), rs.getString("prev_hash"),
                 rs.getString("hash"), rs.getInt("archived") == 1);

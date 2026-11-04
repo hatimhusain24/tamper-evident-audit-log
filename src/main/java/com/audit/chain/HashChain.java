@@ -21,8 +21,8 @@ import java.util.TreeMap;
  *
  * <pre>
  * fieldHashes[k] = SHA-256( salt_k || canonical([k, payload[k]]) )
- * hash           = SHA-256( canonical({seq, timestamp, eventType, actorId, resourceType,
- *                                      resourceId, fieldHashes, prevHash}) )
+ * hash           = SHA-256( canonical({seq, timestamp, eventType, actorId, recordedBy,
+ *                                      resourceType, resourceId, fieldHashes, prevHash}) )
  * </pre>
  *
  * The record hash covers a salted commitment of each payload field, not the raw value, so a
@@ -35,6 +35,10 @@ public final class HashChain {
     public static final String REDACTED = "[REDACTED]";
     public static final String REDACTION_EVENT = "RECORD_REDACTED";
     public static final String ARCHIVE_EVENT = "RECORDS_ARCHIVED";
+    public static final String REPORT_EVENT = "COMPLIANCE_REPORT_GENERATED";
+
+    /** Event types only the service itself may write. */
+    public static final java.util.Set<String> SYSTEM_EVENTS = java.util.Set.of(REDACTION_EVENT, ARCHIVE_EVENT, REPORT_EVENT);
 
     /** Canonical JSON: keys sorted at every level (maps and objects), no whitespace, UTF-8. */
     private static final ObjectMapper CANONICAL = JsonMapper.builder()
@@ -76,6 +80,7 @@ public final class HashChain {
         body.put("timestamp", r.timestamp());
         body.put("eventType", r.eventType());
         body.put("actorId", r.actorId());
+        body.put("recordedBy", r.recordedBy());
         body.put("resourceType", r.resourceType());
         body.put("resourceId", r.resourceId());
         body.put("fieldHashes", r.fieldHashes());
@@ -85,8 +90,8 @@ public final class HashChain {
 
     /** Create a fully hashed record from validated event fields. */
     public static AuditRecord build(long seq, String prevHash, String timestamp, String eventType,
-                                    String actorId, String resourceType, String resourceId,
-                                    Map<String, Object> payload) {
+                                    String actorId, String recordedBy, String resourceType,
+                                    String resourceId, Map<String, Object> payload) {
         Map<String, String> salts = new LinkedHashMap<>();
         Map<String, String> fieldHashes = new LinkedHashMap<>();
         payload.forEach((key, value) -> {
@@ -95,14 +100,14 @@ public final class HashChain {
             salts.put(key, HEX.formatHex(salt));
             fieldHashes.put(key, fieldHash(salts.get(key), key, value));
         });
-        AuditRecord unsigned = new AuditRecord(seq, timestamp, eventType, actorId, resourceType,
-                resourceId, payload, salts, fieldHashes, prevHash, null, false);
+        AuditRecord unsigned = new AuditRecord(seq, timestamp, eventType, actorId, recordedBy,
+                resourceType, resourceId, payload, salts, fieldHashes, prevHash, null, false);
         return withHash(unsigned, recordHash(unsigned));
     }
 
     static AuditRecord withHash(AuditRecord r, String hash) {
-        return new AuditRecord(r.seq(), r.timestamp(), r.eventType(), r.actorId(), r.resourceType(),
-                r.resourceId(), r.payload(), r.salts(), r.fieldHashes(), r.prevHash(), hash,
+        return new AuditRecord(r.seq(), r.timestamp(), r.eventType(), r.actorId(), r.recordedBy(),
+                r.resourceType(), r.resourceId(), r.payload(), r.salts(), r.fieldHashes(), r.prevHash(), hash,
                 r.archived());
     }
 
@@ -119,7 +124,8 @@ public final class HashChain {
         if (r.archived()) {
             return null; // tombstone: content purged by retention; the link above is still checked
         }
-        if (r.timestamp() == null || r.eventType() == null || r.actorId() == null || r.resourceType() == null
+        if (r.timestamp() == null || r.eventType() == null || r.actorId() == null || r.recordedBy() == null
+                || r.resourceType() == null
                 || r.resourceId() == null || r.payload() == null || r.salts() == null || r.fieldHashes() == null) {
             return new Violation("CORRUPT_RECORD", "a required column is missing or unreadable");
         }

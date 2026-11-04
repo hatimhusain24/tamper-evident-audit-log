@@ -21,4 +21,10 @@
         </Or>
         <Bug pattern="SQL_INJECTION_SPRING_JDBC"/>
     </Match>
+    <!-- Stateless JSON API: no session cookie to ride on, and every POST requires
+         application/json, which a cross-site form cannot send (SecurityTest covers this). -->
+    <Match>
+        <Class name="com.audit.security.SecurityConfig"/>
+        <Bug pattern="SPRING_CSRF_PROTECTION_DISABLED"/>
+    </Match>
 </FindBugsFilter>

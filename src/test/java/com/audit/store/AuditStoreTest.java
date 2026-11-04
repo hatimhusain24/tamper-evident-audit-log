@@ -34,9 +34,9 @@ class AuditStoreTest {
         TestClock clock = clockAt("2026-01-01T12:00:00Z");
         AuditStore store = new AuditStore(dataSource(dir.resolve("a.db")), clock, SIX_YEARS);
 
-        AuditRecord first = store.append("X_Y", "a", "r", "1", Map.of());
+        AuditRecord first = store.append("X_Y", "a", "svc", "r", "1", Map.of());
         clock.advanceDays(-1);                                    // NTP correction, VM resume, etc.
-        AuditRecord second = store.append("X_Y", "a", "r", "1", Map.of());
+        AuditRecord second = store.append("X_Y", "a", "svc", "r", "1", Map.of());
 
         assertThat(second.timestamp()).isEqualTo(first.timestamp());
         assertThat(store.verify().valid()).isTrue();
@@ -46,9 +46,9 @@ class AuditStoreTest {
     void retentionArchivesOnlyRecordsOlderThanTheWindow(@TempDir Path dir) {
         TestClock clock = clockAt("2020-01-01T00:00:00Z");
         AuditStore store = new AuditStore(dataSource(dir.resolve("b.db")), clock, SIX_YEARS);
-        store.append("X_Y", "a", "r", "1", Map.of());                 // year 0
+        store.append("X_Y", "a", "svc", "r", "1", Map.of());                 // year 0
         clock.advanceDays(4 * 365);
-        store.append("X_Y", "a", "r", "1", Map.of());                 // year 4
+        store.append("X_Y", "a", "svc", "r", "1", Map.of());                 // year 4
         clock.advanceDays(3 * 365);                                   // now year 7
 
         AuditStore.RetentionResult result = store.archive(SIX_YEARS, "ops");
@@ -68,7 +68,7 @@ class AuditStoreTest {
         Path file = dir.resolve("d.db");
         TestClock clock = clockAt("2026-01-01T00:00:00Z");
         AuditStore weakDeployment = new AuditStore(dataSource(file), clock, 0);   // misconfigured once
-        weakDeployment.append("X_Y", "a", "r", "1", Map.of());
+        weakDeployment.append("X_Y", "a", "svc", "r", "1", Map.of());
         clock.advanceDays(1);
         weakDeployment.archive(0, "ops");
 

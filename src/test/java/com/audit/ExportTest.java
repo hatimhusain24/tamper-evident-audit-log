@@ -102,8 +102,7 @@ class ExportTest extends ApiTestBase {
     @Test
     void bundleSpanningRedactedAndArchivedHistoryVerifies() throws Exception {
         seed(4);
-        post("/audit/events/3/redactions", Map.of("fields", List.of("accountNumber"), "reason", "erasure",
-                "requestedBy", "dpo"));
+        post("/audit/events/3/redactions", Map.of("fields", List.of("accountNumber"), "reason", "erasure"));
         archiveAfterSevenYears();
         post("/audit/events", event(7));
         Bundle b = bundle(exportFor("actorId", "user-1"));

@@ -28,7 +28,7 @@ class HashChainTest {
             payload.put("field", "email");
             payload.put("accountNumber", "12345" + i);
             AuditRecord r = HashChain.build(i, prev, "2026-01-01T00:00:0" + i + ".000000Z",
-                    "RECORD_UPDATED", "user-" + i, "ACCOUNT", "acc-1", payload);
+                    "RECORD_UPDATED", "user-" + i, "svc-test", "ACCOUNT", "acc-1", payload);
             chain.add(r);
             prev = r.hash();
         }
@@ -75,14 +75,14 @@ class HashChainTest {
         payload.put("name", "José 李 ✓");
         payload.put("missing", null);
         payload.put("nested", Map.of("list", List.of(1, 2.5, true)));
-        AuditRecord r = HashChain.build(1, HashChain.GENESIS_HASH, "t", "X_Y", "a", "r", "1", payload);
+        AuditRecord r = HashChain.build(1, HashChain.GENESIS_HASH, "t", "X_Y", "a", "svc-test", "r", "1", payload);
         assertThat(HashChain.verify(List.of(r)).valid()).isTrue();
     }
 
     @Test
     void sameValueGetsDifferentCommitmentsBecauseOfSalt() {
         List<AuditRecord> c = chain(2);
-        AuditRecord same = HashChain.build(3, c.get(1).hash(), "t", "X_Y", "a", "r", "1",
+        AuditRecord same = HashChain.build(3, c.get(1).hash(), "t", "X_Y", "a", "svc-test", "r", "1",
                 Map.of("field", "email"));
         assertThat(same.fieldHashes().get("field")).isNotEqualTo(c.get(0).fieldHashes().get("field"));
     }
@@ -91,6 +91,8 @@ class HashChainTest {
         return Stream.of(
                 Arguments.of("actor edited", (Consumer<List<AuditRecord>>) c ->
                         c.set(2, with(c.get(2), "actorId", "mallory")), "HASH_MISMATCH", 3L),
+                Arguments.of("submitter edited", (Consumer<List<AuditRecord>>) c ->
+                        c.set(2, with(c.get(2), "recordedBy", "someone-else")), "HASH_MISMATCH", 3L),
                 Arguments.of("timestamp edited", (Consumer<List<AuditRecord>>) c ->
                         c.set(2, with(c.get(2), "timestamp", "2020-01-01T00:00:00.000000Z")), "HASH_MISMATCH", 3L),
                 Arguments.of("payload value edited", (Consumer<List<AuditRecord>>) c ->
@@ -140,7 +142,7 @@ class HashChainTest {
 
     @Test
     void literalRedactedTextWithASaltIsNormalData() {
-        AuditRecord r = HashChain.build(1, HashChain.GENESIS_HASH, "t", "X_Y", "a", "r", "1",
+        AuditRecord r = HashChain.build(1, HashChain.GENESIS_HASH, "t", "X_Y", "a", "svc-test", "r", "1",
                 new LinkedHashMap<>(Map.of("note", HashChain.REDACTED)));
         assertThat(HashChain.verify(List.of(r)).valid()).isTrue();
     }
@@ -159,7 +161,7 @@ class HashChainTest {
     void tombstoneWithoutPolicyEventIsFlagged() {
         List<AuditRecord> c = chain(3);
         AuditRecord t = c.get(0);
-        c.set(0, new AuditRecord(t.seq(), t.timestamp(), null, null, null, null, null, null, null,
+        c.set(0, new AuditRecord(t.seq(), t.timestamp(), null, null, null, null, null, null, null, null,
                 t.prevHash(), t.hash(), true));
         assertThat(HashChain.verify(c).violation()).isEqualTo("UNAUTHORIZED_ARCHIVE");
     }
@@ -177,7 +179,7 @@ class HashChainTest {
     void untombstonedRecordWithPurgedContentIsCorrupt() {
         List<AuditRecord> c = chain(2);
         AuditRecord t = c.get(0);
-        c.set(0, new AuditRecord(t.seq(), t.timestamp(), null, null, null, null, null, null, null,
+        c.set(0, new AuditRecord(t.seq(), t.timestamp(), null, null, null, null, null, null, null, null,
                 t.prevHash(), t.hash(), false));                    // archived flag cleared, content gone
         assertThat(HashChain.verify(c).violation()).isEqualTo("CORRUPT_RECORD");
     }

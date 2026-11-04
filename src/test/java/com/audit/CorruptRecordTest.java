@@ -48,7 +48,7 @@ class CorruptRecordTest extends ApiTestBase {
         post("/audit/events", Map.of("eventType", "ACCOUNT_VIEWED", "actorId", "emp-1",
                 "resourceType", "CLIENT_ACCOUNT", "resourceId", "acc-1", "payload", Map.of("purpose", "call")));
         tamper("UPDATE events SET payload = '{broken' WHERE seq = 1");
-        Response r = get("/audit/reports/account-access", "requestedBy", "c-1");
+        Response r = post("/audit/reports/account-access", Map.of("accountId", "acc-1"));
         assertThat(r.status()).isEqualTo(200);
         assertThat(r.<Map<String, Object>>get("integrity")).containsEntry("violation", "CORRUPT_RECORD");
     }
