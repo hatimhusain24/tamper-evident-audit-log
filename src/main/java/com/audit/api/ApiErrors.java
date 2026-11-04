@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpHeaders;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
@@ -35,6 +36,13 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
     @ExceptionHandler(AuditStore.Conflict.class)
     ProblemDetail conflict(AuditStore.Conflict e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+    }
+
+    /** Denials raised inside a request (e.g. a READER token without resource scopes). */
+    @ExceptionHandler(AccessDeniedException.class)
+    ProblemDetail denied(AccessDeniedException e) {
+        LoggerFactory.getLogger("audit.security").warn("access denied: {}", e.getMessage());
+        return ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.getMessage());
     }
 
     @ExceptionHandler(AuditStore.PolicyViolation.class)

@@ -2,13 +2,19 @@ package com.audit.security;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
 /**
  * Per-user resource scopes (protection against IDOR / broken object-level authorization).
  * A scope is {@code TYPE:ID} where TYPE is a resource type or {@code *}, and ID is an exact id or a
  * prefix ending in {@code *}. Examples: {@code CLIENT_ACCOUNT:acc-1*}, {@code SESSION:*}.
- * A user with no scopes is unrestricted; READER users must always declare scopes.
+ * A user with no scopes is unrestricted; READER users must always declare scopes. Basic users get
+ * scopes from configuration; token users from the {@code resource_scopes} claim.
  */
 public final class ResourceScopes {
 
@@ -45,7 +51,44 @@ public final class ResourceScopes {
                 u -> u.resourceScopes() == null ? List.of() : u.resourceScopes().stream().map(Scope::parse).toList())));
     }
 
-    /** Empty list = unrestricted. */
+    /**
+     * Scopes of the authenticated caller; empty list = unrestricted. A READER-only token without a
+     * resource_scopes claim, or with a malformed one, is refused (403) rather than unrestricted.
+     */
+    public List<Scope> of(Authentication auth) {
+        if (auth instanceof JwtAuthenticationToken token) {
+            List<String> claim = token.getToken().getClaimAsStringList("resource_scopes");
+            if (claim == null || claim.isEmpty()) {
+                if (readerOnly(auth)) {
+                    throw new AccessDeniedException("READER token has no resource_scopes claim");
+                }
+                return List.of();
+            }
+            try {
+                return claim.stream().map(Scope::parse).toList();
+            } catch (IllegalStateException e) {
+                throw new AccessDeniedException("token has a malformed resource_scopes claim");
+            }
+        }
+        return of(auth.getName());
+    }
+
+    public boolean unrestricted(Authentication auth) {
+        return of(auth).isEmpty();
+    }
+
+    public boolean allows(Authentication auth, String resourceType, String resourceId) {
+        List<Scope> scopes = of(auth);
+        return scopes.isEmpty() || scopes.stream().anyMatch(s -> s.matches(resourceType, resourceId));
+    }
+
+    private static boolean readerOnly(Authentication auth) {
+        Set<String> roles = auth.getAuthorities().stream().map(GrantedAuthority::getAuthority)
+                .collect(Collectors.toSet());
+        return roles.contains("ROLE_READER") && !roles.contains("ROLE_COMPLIANCE") && !roles.contains("ROLE_ADMIN");
+    }
+
+    /** Empty list = unrestricted (configured Basic users). */
     public List<Scope> of(String user) {
         return byUser.getOrDefault(user, List.of());
     }

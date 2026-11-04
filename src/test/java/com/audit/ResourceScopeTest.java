@@ -105,17 +105,17 @@ class ResourceScopeTest extends ApiTestBase {
     void readersMustDeclareScopesAndPatternsAreValidated() {
         String hash = "{bcrypt}$2a$04$0sIXKTA2vcYfH6SMwIU1R.KjAtxZC.hpo3KnQRJg9yhAqFl7mFy9m";
         SecurityConfig config = new SecurityConfig();
-        assertThatThrownBy(() -> config.users(new AuditSecurityProperties(
-                List.of(new ApiUser("r", hash, List.of("READER"), null))))).hasMessageContaining("resource-scopes");
-        assertThat(config.users(new AuditSecurityProperties(
-                List.of(new ApiUser("c", hash, List.of("COMPLIANCE"), null))))).isNotNull();   // unscoped allowed
+        assertThatThrownBy(() -> config.users(new AuditSecurityProperties("basic",
+                List.of(new ApiUser("r", hash, List.of("READER"), null, null)), null), java.time.Clock.systemUTC())).hasMessageContaining("resource-scopes");
+        assertThat(config.users(new AuditSecurityProperties("basic",
+                List.of(new ApiUser("c", hash, List.of("COMPLIANCE"), null, null)), null), java.time.Clock.systemUTC())).isNotNull();   // unscoped allowed
         for (String bad : List.of("noColon", "TYPE:", ":id", "TY*PE:id", "TYPE:a*b")) {
-            assertThatThrownBy(() -> config.resourceScopes(new AuditSecurityProperties(
-                    List.of(new ApiUser("u", hash, List.of("WRITER"), List.of(bad)))))).as(bad)
+            assertThatThrownBy(() -> config.resourceScopes(new AuditSecurityProperties("basic",
+                    List.of(new ApiUser("u", hash, List.of("WRITER"), List.of(bad), null)), null))).as(bad)
                     .hasMessageContaining("TYPE:ID");
         }
-        var scopes = config.resourceScopes(new AuditSecurityProperties(
-                List.of(new ApiUser("u", hash, List.of("WRITER"), List.of("*:acc-*", "SESSION:s1")))));
+        var scopes = config.resourceScopes(new AuditSecurityProperties("basic",
+                List.of(new ApiUser("u", hash, List.of("WRITER"), List.of("*:acc-*", "SESSION:s1"), null)), null));
         assertThat(scopes.allows("u", "ANYTHING", "acc-9")).isTrue();
         assertThat(scopes.allows("u", "SESSION", "s1")).isTrue();
         assertThat(scopes.allows("u", "SESSION", "s2")).isFalse();

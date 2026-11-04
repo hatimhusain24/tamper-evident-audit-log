@@ -197,22 +197,22 @@ class SecurityTest extends ApiTestBase {
     // ---- fail-closed configuration (no Spring context needed) ----------------------------
 
     static AuditSecurityProperties users(ApiUser... users) {
-        return new AuditSecurityProperties(List.of(users));
+        return new AuditSecurityProperties("basic", List.of(users), null);
     }
 
     @Test
     void refusesToStartWithoutUsers() {
-        assertThatThrownBy(() -> new SecurityConfig().users(new AuditSecurityProperties(List.of())))
+        assertThatThrownBy(() -> new SecurityConfig().users(new AuditSecurityProperties("basic", List.of(), null), java.time.Clock.systemUTC()))
                 .hasMessageContaining("refuses to start");
-        assertThatThrownBy(() -> new SecurityConfig().users(new AuditSecurityProperties(null)))
+        assertThatThrownBy(() -> new SecurityConfig().users(new AuditSecurityProperties("basic", null, null), java.time.Clock.systemUTC()))
                 .hasMessageContaining("refuses to start");
     }
 
     @Test
     void refusesPlaintextPasswordsAndUnknownRoles() {
-        assertThatThrownBy(() -> new SecurityConfig().users(users(new ApiUser("u", "{noop}secret", List.of("READER"), null))))
+        assertThatThrownBy(() -> new SecurityConfig().users(users(new ApiUser("u", "{noop}secret", List.of("READER"), null, null)), java.time.Clock.systemUTC()))
                 .hasMessageContaining("bcrypt");
-        assertThatThrownBy(() -> new SecurityConfig().users(users(new ApiUser("u", "{bcrypt}x", List.of("SUPERUSER"), null))))
+        assertThatThrownBy(() -> new SecurityConfig().users(users(new ApiUser("u", "{bcrypt}x", List.of("SUPERUSER"), null, null)), java.time.Clock.systemUTC()))
                 .hasMessageContaining("unknown roles");
     }
 }

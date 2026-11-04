@@ -3,12 +3,14 @@ package com.audit;
 import com.audit.chain.BundleVerifierCli;
 import com.audit.chain.IntegrityKey;
 import com.audit.chain.SigningKey;
+import com.audit.security.DevTokenCli;
 import com.audit.store.FieldCipher;
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
 import io.swagger.v3.oas.annotations.info.Info;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.security.SecurityScheme;
+import io.swagger.v3.oas.annotations.security.SecuritySchemes;
 import java.time.Clock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
@@ -20,8 +22,10 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 @OpenAPIDefinition(info = @Info(title = "Tamper-Evident Audit Log", version = "1.0.0",
         description = "Append-only, hash-chained audit events. No update or delete API."),
-        security = @SecurityRequirement(name = "basicAuth"))
-@SecurityScheme(name = "basicAuth", type = SecuritySchemeType.HTTP, scheme = "basic")
+        security = {@SecurityRequirement(name = "bearerAuth"), @SecurityRequirement(name = "basicAuth")})
+@SecuritySchemes({
+    @SecurityScheme(name = "bearerAuth", type = SecuritySchemeType.HTTP, scheme = "bearer", bearerFormat = "JWT"),
+    @SecurityScheme(name = "basicAuth", type = SecuritySchemeType.HTTP, scheme = "basic")})
 public class AuditLogApplication {
 
     /**
@@ -31,6 +35,9 @@ public class AuditLogApplication {
     public static void main(String[] args) {
         if (args.length > 0 && "verify-bundle".equals(args[0])) {
             System.exit(BundleVerifierCli.run(args));
+        }
+        if (args.length > 0 && "issue-dev-token".equals(args[0])) {
+            System.exit(DevTokenCli.run(args));
         }
         SpringApplication.run(AuditLogApplication.class, args);
     }

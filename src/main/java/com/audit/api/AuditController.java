@@ -87,7 +87,7 @@ public final class AuditController {
 
     /** Bulk and admin operations span every resource, so they need a user without resource scopes. */
     private void requireUnrestricted(Authentication auth) {
-        if (!scopes.unrestricted(auth.getName())) {
+        if (!scopes.unrestricted(auth)) {
             SECURITY_LOG.warn("scoped user denied bulk operation user={}", LogSafe.clean(auth.getName()));
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "this operation needs access to all resources");
         }
@@ -108,7 +108,7 @@ public final class AuditController {
     public ResponseEntity<EventView> write(@Valid @RequestBody EventRequest event, Authentication auth,
             @RequestHeader(value = "Idempotency-Key", required = false)
             @Pattern(regexp = "^[A-Za-z0-9_-]{8,64}$") String idempotencyKey) {
-        if (!scopes.allows(auth.getName(), event.resourceType(), event.resourceId())) {
+        if (!scopes.allows(auth, event.resourceType(), event.resourceId())) {
             SECURITY_LOG.warn("write outside resource scope user={} resource={}:{}", LogSafe.clean(auth.getName()),
                     LogSafe.clean(event.resourceType()), LogSafe.clean(event.resourceId()));
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "resource is outside your scope");
@@ -156,7 +156,7 @@ public final class AuditController {
         filters.put("resourceType", resourceType);
         filters.put("resourceId", resourceId);
         filters.put("eventType", eventType);
-        AuditStore.Page page = store.query(filters, from, to, limit, cursor, scopes.of(auth.getName()));
+        AuditStore.Page page = store.query(filters, from, to, limit, cursor, scopes.of(auth));
         Set<String> mask = maskFor(auth);
         return new EventPage(page.items().stream().map(r -> EventView.of(r, mask)).toList(), page.nextCursor());
     }
