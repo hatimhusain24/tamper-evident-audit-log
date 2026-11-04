@@ -41,6 +41,7 @@ each row (intent, constraints, acceptance criteria) as its own task definition. 
 | P9 | List what is still missing from the scorecard, then complete every small and medium item precisely | Second round in §6: versioning, proxy-aware rate limit, signed bundles and checkpoints, key rotation, encryption at rest, dependency scan, TLS profile; 207 tests |
 | P10 | Merge the pending dependency PRs | All 7 Dependabot PRs tested and merged, incl. Spring Boot 4.1 (see below) |
 | P11 | Do per-resource access (IDOR/BOLA) and JSON logs | Resource scopes and ECS logs with user + request id; 218 tests |
+| P12 | Add OAuth2 with Spring Security, and remove the single-instance and full-verify limits, following the brief and the evaluation | JWT resource server, password expiry, incremental verify, shared rate limits, two-instance test; 239 tests |
 
 ## 2. Decision log: generated / modified / rejected
 
@@ -120,6 +121,8 @@ Evaluation rework (to be reviewed and ticked by the engineer):
 - [ ] Signed bundles and checkpoints (`SigningKey`, `CheckpointService`), commits `914eb0d`, `9812903`
 - [ ] HMAC key rotation and encryption at rest (`IntegrityKey`, `FieldCipher`), commits `38c7da9`, `ef638a9`
 - [ ] Per-resource authorization (`ResourceScopes`, scoped query), commit `0457009`
+- [ ] OAuth2 resource server and password expiry (`JwtSupport`, `SecurityConfig`), commit `422ad7e`
+- [ ] Incremental verify and multi-instance support (`verifyFrom`, `RateLimiter`), commits `963f1e6`, `ce929cf`
 
 ## 5. Engineer review log (engineer appends entries during review / rework)
 
@@ -219,4 +222,22 @@ All seven were tested on an integration branch and merged only with the full gat
 | 38 | Filter scopes inside the SQL query | Filter results after the query | Post-filtering breaks page sizes and still reads other clients' rows |
 | 39 | Out-of-scope query returns an empty list, out-of-scope write returns 403 | 403 for reads too | An empty result doesn't reveal whether another client's account exists |
 | 40 | READER must have scopes; other roles default to unrestricted | Scopes optional for everyone | Readers are the broad, many-user role; compliance and admin need the whole log by design |
+
+### Fourth round (P12): OAuth2 and scaling
+
+| Gap (scorecard ID) | Fix | Regression test | Commit |
+|---|---|---|---|
+| Basic auth only; no OAuth2/OIDC (SEC-01) | OAuth2 resource server (JWT): RS256, issuer, audience, expiry, max lifetime; roles and scopes from claims; dev token tool | `OAuth2JwtTest` (11) | `422ad7e` |
+| No credential expiry (SEC-02) | Short-lived tokens; `password-expires-at` for Basic users | `expiredPasswordIsRejectedAndExpiryFollowsTheClock` | `422ad7e` |
+| Missing `iat` let a long-lived token through | Expiry also capped relative to now (found by the token tests) | `invalidTokensAreRejected` | `422ad7e` |
+| O(n) verify on every call (ARC-10) | Incremental verify from the signed checkpoint; checkpoint refuses a broken chain | `IncrementalVerifyTest` (6) | `963f1e6` |
+| JVM-local lock and in-memory rate limiter (ARC-09, SEC-06) | Database-level serialization proven with two instances; database-backed shared rate limiter | `MultiInstanceTest` (4) | `ce929cf` |
+
+| # | Decision | Alternatives rejected | Why |
+|---|---|---|---|
+| 41 | OAuth2 resource server with JWT; Basic kept as a mode | mTLS; dropping Basic | Matches the evaluation's suggestion; Basic stays useful for local demos and small deployments |
+| 42 | RS256 only, JWKS from the issuer | Accept any algorithm | Blocks `alg:none` and HS256 key-confusion attacks (both tested) |
+| 43 | Cap `exp` against now as well as `iat` | Trust `iat` | Spring fills a missing `iat` with `exp - 1s`; a test showed the bypass |
+| 44 | Incremental verify as an option, full verify by default and before each checkpoint | Incremental by default | Redaction changes old records, so only a full walk proves them; the trade-off is documented |
+| 45 | Database-backed rate limiter as an option | Redis | No extra infrastructure; the same database already serializes writes |
 

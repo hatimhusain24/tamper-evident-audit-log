@@ -175,7 +175,7 @@ after export, which the hashes alone can't show.
 | Control | Implementation |
 |---|---|
 | Framework | Spring Security filter chain, **deny by default** (`anyRequest().denyAll()`) |
-| Authentication | Stateless HTTP Basic; users from config with `{bcrypt}` hashes only. No users, plaintext passwords or unknown roles → **the app won't start** |
+| Authentication | **OAuth2 resource server** (default): JWT access tokens from an OIDC provider, RS256 only (no `alg:none`/HS256 confusion), issuer + audience + `exp`/`nbf` checked, lifetime ≤ 60 min (checked against now too, because Spring fills a missing `iat`). Optional HTTP Basic with `{bcrypt}` users and `password-expires-at`. Missing issuer/JWKS (jwt) or users (basic), plaintext passwords or unknown roles → **the app won't start** |
 | Authorisation (function level) | WRITER: append · READER: query, verify (masked) · COMPLIANCE: unmasked query, export, reports · ADMIN: redaction, retention, query, verify, metrics. Export is COMPLIANCE only (least privilege) |
 | Authorisation (object level) | Resource scopes per user (`TYPE:ID` or `TYPE:PREFIX*`). READERs must have scopes; queries are filtered in SQL to the scopes (LIKE wildcards escaped); scoped writers only write their own resources; bulk operations need an unscoped user. Prevents IDOR / BOLA |
 | Attribution | `recordedBy` = authenticated name, in the hash. `requestedBy` is never read from a body |
@@ -189,8 +189,20 @@ after export, which the hashes alone can't show.
 | Exposure | Swagger and the API schema are off unless the `dev` profile is active; `/actuator/health` shows status only |
 | Supply chain | SpotBugs + FindSecBugs in the build; Dependabot weekly; OWASP dependency-check weekly (CVSS ≥ 7 fails) |
 
-Upgrading to OAuth2/OIDC tokens or mTLS changes only `SecurityConfig`; the chain package doesn't
-know about identity at all.
+Identity lives only in `security/` (`SecurityConfig`, `JwtSupport`, `ResourceScopes`); the chain
+package doesn't know about identity at all, so OIDC and RBAC were added without touching it.
+
+## 5c. Scaling and verification cost
+
+* **Several instances:** writes are serialized by the database lock taken at the start of every
+  write transaction, not by the JVM. A test runs two independent stores against one database with
+  100 concurrent writes and no fork. Rate limits can be shared through the database
+  (`audit.rate-limit.store=database`). SQLite limits this to one host; Postgres would remove it
+  (only `AuditStore` changes).
+* **Incremental verify:** `GET /v1/audit/verify?mode=incremental` starts from the last signed
+  checkpoint (its record must still have the signed hash and MAC) and walks only newer records. The
+  full verify runs before every checkpoint, so older records are still re-checked each interval;
+  a change to an old record is caught at the next full run, not instantly. That is the trade-off.
 
 ## 6. Threat model
 

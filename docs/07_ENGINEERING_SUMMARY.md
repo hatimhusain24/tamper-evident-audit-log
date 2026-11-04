@@ -16,7 +16,7 @@
    a service that won't start without credentials and keys. This was added after the evaluation showed the
    original "trusted callers" assumption was not acceptable for client-data audit.
 5. **Keep it small and tested.** Spring Boot plus SQLite JDBC, about 2,200 lines of application
-   code, 218 tests, no ORM, no mocks, coverage gated at 90% line / 85% branch.
+   code, 239 tests, no ORM, no mocks, coverage gated at 90% line / 85% branch.
 
 ## Artifacts
 
@@ -60,14 +60,14 @@ production · Scenario C assumptions in [04](04_SCENARIO_C_COMPLIANCE.md) §1.
 
 * An attacker holding DB access **and** the keys could rewrite the chain and checkpoints; keep keys
   in a KMS/HSM and the checkpoint file on separate WORM storage.
-* Authentication is HTTP Basic with configured users: no OIDC, password expiry or rotation.
+* Token validation is tested with locally signed tokens, not against a live identity provider.
 * The AES field-encryption key can't be rotated yet (the HMAC key can).
-* Single SQLite file and an in-memory rate limiter: one service instance; verify is O(n).
+* Several instances work on one host (shared SQLite file, database rate limiter); across hosts the
+  store would move to Postgres. Full verify is O(n); incremental verify covers only new records.
 * Nested-field redaction is not supported (redact the parent key).
 
 ## Next steps (in order)
 
-1. OIDC tokens instead of Basic, and all keys held in a KMS/HSM.
-2. Incremental verify from the last signed checkpoint instead of walking the whole chain.
-3. Postgres store and a shared rate limiter for horizontal scaling.
-4. Rotation for the field-encryption key.
+1. All keys held in a KMS/HSM, with rotation for the field-encryption key.
+2. Postgres store for deployments across hosts.
+3. An integration test against a real identity provider (e.g. Keycloak in CI).

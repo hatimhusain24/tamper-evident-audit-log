@@ -9,6 +9,9 @@
 | **Integration (Spring + real SQLite + real auth)** | Every endpoint through MockMvc with HTTP Basic users on a real database file | `ScenarioAApiTest` (28), `RedactionTest` (8), `RetentionTest` (12), `ExportTest` (15), `ComplianceReportTest` (7) |
 | **Security** | Endpoint × role × outcome matrix, anonymous access, wrong passwords, spoofing, masking, headers incl. HSTS, CSRF, versioned paths, fail-closed config | `SecurityTest` (50) |
 | **Adversarial integrity** | Raw SQL bypassing the API and triggers; full chain rewrite; tail truncation; key validation | `tamper(...)` in `ApiTestBase`, `IntegrityKeyTest` (9) |
+| **OAuth2 / JWT** | Valid token and `sub` → recordedBy; roles and scopes from claims; expired, not-yet-valid, wrong issuer/audience, too long, no exp, other key, HS256 confusion, `alg:none`; password expiry; dev token tool; fail-closed config | `OAuth2JwtTest` (11) |
+| **Incremental verify** | Only post-checkpoint records, agreement with full verify, tampering after the checkpoint, changed or truncated anchor, redactions and tombstones, fallback | `IncrementalVerifyTest` (6) |
+| **Multi-instance** | Two independent stores on one database (100 concurrent writes, no fork); shared database rate limiter | `MultiInstanceTest` (4) |
 | **Object-level authorization** | Scoped reader sees only its accounts, cross-account queries return nothing, scoped pagination, LIKE-wildcard escaping, scoped writer and bulk-operation denials, startup validation | `ResourceScopeTest` (8) |
 | **Structured logging** | Tamper alert as a JSON line with user and request id; no password in failed-login logs; newline injection | `StructuredLoggingTest` (3) |
 | **Checkpoints** | Signed checkpoints, automatic truncation detection, edited checkpoint file, no checkpoint of broken chains | `CheckpointTest` (8) |
@@ -19,7 +22,7 @@
 | **Boundaries** | Last allowed value passes, one more fails (32 KB payload, 128-char ids, 64-char type, 50 fields, 500-char reason, page 500) | `BoundaryTest` (6) |
 | **Concurrency** | 80 writes from an 8-thread pool, then full verify; 16 concurrent retries with one key | `concurrentWritersNeverForkTheChain`, `concurrentRetriesWriteExactlyOnce` |
 
-**218 tests, 0 skipped, about 1.5 minutes.** No mocks: tests use the real database, real Spring
+**239 tests, 0 skipped, about 1.5 minutes.** No mocks: tests use the real database, real Spring
 Security and real HTTP Basic. Tests assert the **exact violation and location** (`violation`,
 `firstInvalidSeq`), not only `valid == false`. Time-dependent behaviour (6-year retention, rate
 windows, clock corrections) runs on a movable `TestClock`, so the real legal floor is tested
@@ -34,9 +37,9 @@ but fails the signature.
 
 | Counter | Covered | Gate |
 |---|---|---|
-| Line | **96.3%** | ≥ 90% |
-| Branch | **91.0%** | ≥ 85% |
-| Method | **98.1%** | — |
+| Line | **95.6%** | ≥ 90% |
+| Branch | **88.6%** | ≥ 85% |
+| Method | **97.2%** | — |
 
 Report: `target/site/jacoco/index.html` locally; the `reports` artifact of each CI run.
 Uncovered lines are mostly `AuditLogApplication.main` and defensive branches for JVM-guaranteed
@@ -86,6 +89,7 @@ Reproduce with `mvn test -Dtest=PerfBenchmarkTest -Dperf.excluded=none`.
 | Load / soak testing | Out of scope for a prototype; the benchmark is indicative |
 | Property-based fuzzing of canonical JSON | Would add a dependency (jqwik); parametrized cases cover key properties |
 | Cross-language verifier | Algorithm specified in `HashChain` and `02_ARCHITECTURE.md`; not built in a second language |
-| OAuth2 / OIDC tokens | HTTP Basic with bcrypt users is implemented and tested; tokens would replace only `SecurityConfig` |
+| Live identity provider | JWT validation is tested with locally signed tokens and a configured public key; the JWKS fetch from a real IdP is not exercised in tests |
+| Multi-host deployment | Two instances on one database file are tested; SQLite can't span hosts (Postgres would) |
 | Real TLS handshake | The `tls` profile is configuration only; HSTS is tested with MockMvc `secure(true)`, not with a live certificate |
 | OWASP scan locally | Needs the NVD database download and an API key; runs weekly in CI instead of on every build |
