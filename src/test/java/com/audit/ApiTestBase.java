@@ -64,7 +64,7 @@ public abstract class ApiTestBase {
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", () -> "jdbc:sqlite:" + DB_DIR.resolve("audit.db")
-                + "?journal_mode=WAL&busy_timeout=5000&transaction_mode=IMMEDIATE&secure_delete=true");
+                + "?journal_mode=WAL&busy_timeout=2000&secure_delete=true");
     }
 
     protected static final ObjectMapper JSON = new ObjectMapper();

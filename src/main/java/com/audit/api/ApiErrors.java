@@ -4,12 +4,14 @@ import com.audit.security.RequestGuardFilter;
 import com.audit.store.AuditStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.http.ProblemDetail;
+import org.springframework.transaction.TransactionException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
@@ -51,6 +53,19 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
             }
         }
         return super.handleHttpMessageNotReadable(ex, headers, status, request);
+    }
+
+    /** Database busy (another writer holds the lock past the timeout): a retryable 503, not a 500. */
+    @ExceptionHandler({DataAccessException.class, TransactionException.class})
+    ResponseEntity<ProblemDetail> database(RuntimeException e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t.getMessage() != null && t.getMessage().contains("SQLITE_BUSY")) {
+                LOG.warn("database busy, request rejected for retry");
+                return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).header(HttpHeaders.RETRY_AFTER, "1")
+                        .body(ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, "database busy, retry"));
+            }
+        }
+        return ResponseEntity.internalServerError().body(unexpected(e));
     }
 
     @ExceptionHandler(Exception.class)

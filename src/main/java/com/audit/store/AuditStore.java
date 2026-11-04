@@ -37,7 +37,10 @@ import org.springframework.transaction.support.TransactionTemplate;
  * SQLite persistence: the only class that touches the database.
  *
  * <ul>
- *   <li>Writes are serialized (in-process lock + BEGIN IMMEDIATE), so the chain head never forks.</li>
+ *   <li>Writes are serialized: an in-process lock, then the SQLite write lock taken by the first
+ *       statement of every write transaction, so the chain head never forks (even across processes).
+ *       If another process holds the lock past busy_timeout the transaction rolls back cleanly and
+ *       the API answers 503 (retryable).</li>
  *   <li>Reads run as single statements. In WAL mode each sees a consistent snapshot and never
  *       blocks the writer, so verify/export can stream the whole chain.</li>
  *   <li>Triggers block DELETE and edits to chain columns: a guardrail against application bugs,
@@ -164,7 +167,13 @@ public final class AuditStore {
     private <T> T write(Supplier<T> operation) {
         writeLock.lock();
         try {
-            return tx.execute(status -> operation.get());
+            return tx.execute(status -> {
+                // A no-op write takes SQLite's write lock before we read the head (waits up to
+                // busy_timeout). Unlike BEGIN IMMEDIATE, a timeout here leaves the pooled
+                // connection healthy: the transaction simply rolls back.
+                jdbc.update("UPDATE idempotency_keys SET seq = seq WHERE 0");
+                return operation.get();
+            });
         } finally {
             writeLock.unlock();
         }
