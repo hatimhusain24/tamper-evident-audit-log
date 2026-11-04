@@ -19,12 +19,15 @@ import org.junit.jupiter.api.io.TempDir;
 @Tag("perf")
 class PerfBenchmarkTest {
 
+    static final com.audit.store.FieldCipher CIPHER = com.audit.store.FieldCipher.of(
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", java.util.Set.of("ssn"));
+
     @Test
     void appendVerifyAndDeepPage(@TempDir Path dir) {
         try (HikariDataSource ds = new HikariDataSource()) {
             ds.setMaximumPoolSize(4);   // same pool size as the service
             ds.setJdbcUrl("jdbc:sqlite:" + dir.resolve("perf.db") + "?journal_mode=WAL&busy_timeout=5000&secure_delete=true");
-            AuditStore store = new AuditStore(ds, Clock.systemUTC(), 2190, com.audit.chain.IntegrityKey.of("perf-benchmark-hmac-key-0123456789ab"));
+            AuditStore store = new AuditStore(ds, Clock.systemUTC(), 2190, com.audit.chain.IntegrityKey.of("perf-benchmark-hmac-key-0123456789ab"), CIPHER);
             Map<String, Object> payload = Map.of("a", 1, "b", "x".repeat(100), "c", List.of(1, 2, 3));
             for (int i = 0; i < 500; i++) {
                 store.append("RECORD_UPDATED", "u", "svc", "ACCOUNT", "a", payload);   // JIT warm-up

@@ -37,6 +37,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  * SQLite persistence: the only class that touches the database.
  *
  * <ul>
+ *   <li>Sensitive payload fields are AES-GCM encrypted before they reach the database
+ *       ({@link FieldCipher}); hashes cover the plaintext.</li>
  *   <li>Writes are serialized: an in-process lock, then the SQLite write lock taken by the first
  *       statement of every write transaction, so the chain head never forks (even across processes).
  *       If another process holds the lock past busy_timeout the transaction rolls back cleanly and
@@ -137,11 +139,13 @@ public final class AuditStore {
     private final ReentrantLock writeLock = new ReentrantLock();
     private final double retentionMinDays;
     private final IntegrityKey key;
+    private final FieldCipher cipher;
 
     public AuditStore(DataSource dataSource, Clock clock,
                       @Value("${audit.retention-min-days:2190}") double retentionMinDays,
-                      IntegrityKey key) {
+                      IntegrityKey key, FieldCipher cipher) {
         this.key = key;
+        this.cipher = cipher;
         this.jdbc = new JdbcTemplate(dataSource);
         this.tx = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
         this.clock = clock;
@@ -230,7 +234,8 @@ public final class AuditStore {
         AuditRecord r = HashChain.withMac(built, key.mac(built.hash()));
         jdbc.update("INSERT INTO events (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 r.seq(), r.timestamp(), r.eventType(), r.actorId(), r.recordedBy(), r.resourceType(), r.resourceId(),
-                toJson(r.payload()), toJson(r.salts()), toJson(r.fieldHashes()), r.prevHash(), r.hash(), 0, r.mac());
+                toJson(cipher.encrypt(r.payload())), toJson(r.salts()), toJson(r.fieldHashes()), r.prevHash(), r.hash(), 0,
+                r.mac());
         return r;
     }
 
@@ -260,7 +265,7 @@ public final class AuditStore {
                 salts.remove(f);
             });
             jdbc.update("UPDATE events SET payload = ?, salts = ? WHERE seq = ?",
-                    toJson(payload), toJson(salts), seq);
+                    toJson(cipher.encrypt(payload)), toJson(salts), seq);
             return appendInTx(HashChain.REDACTION_EVENT, requestedBy, requestedBy, "AUDIT_EVENT", String.valueOf(seq),
                     Map.of("targetSeq", seq, "fields", targets, "reason", reason));
         });
@@ -398,9 +403,13 @@ public final class AuditStore {
     private AuditRecord toRecord(ResultSet rs) throws SQLException {
         return new AuditRecord(rs.getLong("seq"), rs.getString("timestamp"), rs.getString("event_type"),
                 rs.getString("actor_id"), rs.getString("recorded_by"), rs.getString("resource_type"), rs.getString("resource_id"),
-                fromJson(rs.getString("payload"), OBJECT_MAP), fromJson(rs.getString("salts"), STRING_MAP),
+                decrypted(fromJson(rs.getString("payload"), OBJECT_MAP)), fromJson(rs.getString("salts"), STRING_MAP),
                 fromJson(rs.getString("field_hashes"), STRING_MAP), rs.getString("prev_hash"),
                 rs.getString("hash"), rs.getInt("archived") == 1, rs.getString("mac"));
+    }
+
+    private Map<String, Object> decrypted(Map<String, Object> stored) {
+        return stored == null ? null : cipher.decrypt(stored);
     }
 
     private String toJson(Object value) {

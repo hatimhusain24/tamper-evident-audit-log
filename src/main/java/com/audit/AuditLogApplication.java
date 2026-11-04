@@ -3,6 +3,7 @@ package com.audit;
 import com.audit.chain.BundleVerifierCli;
 import com.audit.chain.IntegrityKey;
 import com.audit.chain.SigningKey;
+import com.audit.store.FieldCipher;
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
 import io.swagger.v3.oas.annotations.info.Info;
@@ -45,6 +46,13 @@ public class AuditLogApplication {
                               @Value("${audit.hmac-key:}") String key,
                               @Value("${audit.hmac-retired-keys:}") String retired) {
         return IntegrityKey.of(keyId, key, retired);
+    }
+
+    /** Fails startup without a 32-byte key: sensitive fields are never stored in plaintext. */
+    @Bean
+    FieldCipher fieldCipher(@Value("${audit.encryption-key:}") String key,
+                            @Value("${audit.sensitive-fields:}") java.util.Set<String> sensitiveFields) {
+        return FieldCipher.of(key, sensitiveFields);
     }
 
     /** Fails startup when the Ed25519 key pair is missing or mismatched. */

@@ -48,11 +48,15 @@ class RedactionTest extends ApiTestBase {
 
     @Test
     void redactedValueIsGoneFromRawDatabaseFiles() throws Exception {
-        post("/v1/audit/events/2/redactions", REDACT);
+        // a NON-encrypted field, so this proves the WAL checkpoint (encrypted fields never hit disk in clear)
+        post("/v1/audit/events", Map.of("eventType", "NOTE_ADDED", "actorId", "emp-1", "resourceType", "ACCOUNT",
+                "resourceId", "acc-9", "payload", Map.of("note", "private-note-990002")));
+        assertThat(post("/v1/audit/events/4/redactions", Map.of("fields", List.of("note"), "reason", "erasure"))
+                .status()).isEqualTo(201);
         try (Stream<Path> files = Files.list(DB_DIR)) {
             for (Path file : files.filter(f -> f.getFileName().toString().startsWith("audit.db")).toList()) {
                 assertThat(new String(Files.readAllBytes(file), java.nio.charset.StandardCharsets.ISO_8859_1))
-                        .as(file.toString()).doesNotContain("990002");
+                        .as(file.toString()).doesNotContain("private-note-990002");
             }
         }
     }

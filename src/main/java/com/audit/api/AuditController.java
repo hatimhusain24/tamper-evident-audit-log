@@ -14,6 +14,7 @@ import com.audit.compliance.AccessReport;
 import com.audit.compliance.AccessReportService;
 import com.audit.store.AuditStore;
 import com.audit.store.CheckpointService;
+import com.audit.store.FieldCipher;
 import com.audit.security.LogSafe;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.validation.Valid;
@@ -101,6 +102,10 @@ public final class AuditController {
                     event.eventType() + " is a reserved system event type");
         }
         Map<String, Object> payload = event.payload() == null ? Map.of() : event.payload();
+        if (payload.values().stream().anyMatch(v -> v instanceof String s && s.startsWith(FieldCipher.PREFIX))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "payload values may not start with the reserved '"
+                    + FieldCipher.PREFIX + "' prefix");
+        }
         if (HashChain.canonical(payload).length > MAX_PAYLOAD_BYTES) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "payload exceeds " + MAX_PAYLOAD_BYTES + " bytes");
         }
