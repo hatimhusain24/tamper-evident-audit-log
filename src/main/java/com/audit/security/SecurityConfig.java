@@ -45,9 +45,11 @@ public class SecurityConfig {
     @Bean
     SecurityFilterChain filterChain(HttpSecurity http, Clock clock,
                                     @Value("${audit.max-request-bytes:65536}") long maxRequestBytes,
-                                    @Value("${audit.rate-limit.per-minute:600}") int perMinute) throws Exception {
+                                    @Value("${audit.rate-limit.per-minute:600}") int perMinute,
+                                    @Value("${audit.trusted-proxies:}") Set<String> trustedProxies) throws Exception {
         http
-            .addFilterBefore(new RequestGuardFilter(maxRequestBytes, perMinute, clock), BasicAuthenticationFilter.class)
+            .addFilterBefore(new RequestGuardFilter(maxRequestBytes, perMinute, clock, trustedProxies),
+                    BasicAuthenticationFilter.class)
             // Stateless JSON API: no sessions or cookies, and every POST must be application/json,
             // which a cross-site form cannot send (tested in SecurityTest).
             .csrf(csrf -> csrf.disable())

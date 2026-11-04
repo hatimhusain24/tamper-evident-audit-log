@@ -10,6 +10,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.time.Clock;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
@@ -20,7 +21,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * Runs before authentication:
  * <ul>
  *   <li>Rate limit per client IP (fixed one-minute window), so floods and password guessing are
- *       throttled with HTTP 429 before any expensive work.</li>
+ *       throttled with HTTP 429 before any expensive work. Behind a load balancer the client IP
+ *       comes from X-Forwarded-For, but only when the request arrives from a configured trusted
+ *       proxy; anyone else's X-Forwarded-For is ignored, so it can't be used to dodge the limit.</li>
  *   <li>Request body limit: an oversized declared body is refused with 413 before it is read;
  *       a body without a declared length is cut off as soon as it passes the limit.</li>
  * </ul>
@@ -43,18 +46,37 @@ public final class RequestGuardFilter extends OncePerRequestFilter {
     private final long maxBodyBytes;
     private final int requestsPerMinute;
     private final Clock clock;
+    private final Set<String> trustedProxies;
     private final Map<String, Window> windows = new ConcurrentHashMap<>();
 
-    public RequestGuardFilter(long maxBodyBytes, int requestsPerMinute, Clock clock) {
+    public RequestGuardFilter(long maxBodyBytes, int requestsPerMinute, Clock clock, Set<String> trustedProxies) {
         this.maxBodyBytes = maxBodyBytes;
         this.requestsPerMinute = requestsPerMinute;
         this.clock = clock;
+        this.trustedProxies = Set.copyOf(trustedProxies);
+    }
+
+    /** The rightmost X-Forwarded-For address that is not a trusted proxy, if the caller is one. */
+    String clientIp(HttpServletRequest request) {
+        String remote = request.getRemoteAddr();
+        String forwarded = request.getHeader("X-Forwarded-For");
+        if (!trustedProxies.contains(remote) || forwarded == null) {
+            return remote;
+        }
+        String[] hops = forwarded.split(",");
+        for (int i = hops.length - 1; i >= 0; i--) {
+            String hop = hops[i].trim();
+            if (!hop.isEmpty() && !trustedProxies.contains(hop)) {
+                return hop;
+            }
+        }
+        return remote;
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        String client = request.getRemoteAddr();
+        String client = clientIp(request);
         if (!allow(client)) {
             SECURITY_LOG.warn("rate limit exceeded client={}", LogSafe.clean(client));
             response.setHeader("Retry-After", "60");
