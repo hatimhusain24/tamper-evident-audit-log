@@ -4,6 +4,7 @@ import com.audit.chain.AuditRecord;
 import com.audit.chain.Bundle;
 import com.audit.chain.ChainVerifier;
 import com.audit.chain.HashChain;
+import com.audit.chain.IntegrityKey;
 import com.audit.chain.VerifyResult;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -88,7 +89,8 @@ public final class AuditStore {
                 field_hashes  TEXT,             -- JSON {field: commitment}
                 prev_hash     TEXT    NOT NULL,
                 hash          TEXT    NOT NULL,
-                archived      INTEGER NOT NULL DEFAULT 0
+                archived      INTEGER NOT NULL DEFAULT 0,
+                mac           TEXT    NOT NULL   -- HMAC-SHA256(server key, hash)
             )""",
             "CREATE INDEX IF NOT EXISTS ix_actor ON events(actor_id, seq)",
             "CREATE INDEX IF NOT EXISTS ix_resource ON events(resource_type, resource_id, seq)",
@@ -99,11 +101,11 @@ public final class AuditStore {
             BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END""",
             """
             CREATE TRIGGER IF NOT EXISTS events_chain_immutable
-            BEFORE UPDATE OF seq, timestamp, prev_hash, hash ON events
+            BEFORE UPDATE OF seq, timestamp, prev_hash, hash, mac ON events
             BEGIN SELECT RAISE(ABORT, 'chain columns are immutable'); END""");
 
     private static final String COLUMNS = "seq, timestamp, event_type, actor_id, recorded_by, "
-            + "resource_type, resource_id, payload, salts, field_hashes, prev_hash, hash, archived";
+            + "resource_type, resource_id, payload, salts, field_hashes, prev_hash, hash, archived, mac";
     private static final String SELECT = "SELECT " + COLUMNS + " FROM events";
     private static final Map<String, String> FILTERS = Map.of(   // API name -> column (whitelist)
             "actorId", "actor_id", "resourceType", "resource_type",
@@ -119,9 +121,12 @@ public final class AuditStore {
     private final ObjectMapper json = new ObjectMapper();
     private final ReentrantLock writeLock = new ReentrantLock();
     private final double retentionMinDays;
+    private final IntegrityKey key;
 
     public AuditStore(DataSource dataSource, Clock clock,
-                      @Value("${audit.retention-min-days:2190}") double retentionMinDays) {
+                      @Value("${audit.retention-min-days:2190}") double retentionMinDays,
+                      @Value("${audit.hmac-key:}") String hmacKey) {
+        this.key = IntegrityKey.of(hmacKey);   // refuses to start without a strong key
         this.jdbc = new JdbcTemplate(dataSource);
         this.tx = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
         this.clock = clock;
@@ -168,11 +173,12 @@ public final class AuditStore {
         String now = iso(clock.instant());
         // keep timestamps monotonic even if the wall clock steps back
         String timestamp = head != null && now.compareTo(head.timestamp()) < 0 ? head.timestamp() : now;
-        AuditRecord r = HashChain.build(seq + 1, prev, timestamp, eventType, actorId, recordedBy,
+        AuditRecord built = HashChain.build(seq + 1, prev, timestamp, eventType, actorId, recordedBy,
                 resourceType, resourceId, payload);
-        jdbc.update("INSERT INTO events (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        AuditRecord r = HashChain.withMac(built, key.mac(built.hash()));
+        jdbc.update("INSERT INTO events (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 r.seq(), r.timestamp(), r.eventType(), r.actorId(), r.recordedBy(), r.resourceType(), r.resourceId(),
-                toJson(r.payload()), toJson(r.salts()), toJson(r.fieldHashes()), r.prevHash(), r.hash(), 0);
+                toJson(r.payload()), toJson(r.salts()), toJson(r.fieldHashes()), r.prevHash(), r.hash(), 0, r.mac());
         return r;
     }
 
@@ -294,7 +300,12 @@ public final class AuditStore {
     }
 
     public VerifyResult verify() {
-        ChainVerifier verifier = new ChainVerifier(retentionMinDays);
+        return verify(null, null);
+    }
+
+    /** Full verification: hashes, MACs, retention policy and (optionally) an external anchor. */
+    public VerifyResult verify(Long anchorSeq, String anchorHash) {
+        ChainVerifier verifier = new ChainVerifier(retentionMinDays, key, anchorSeq, anchorHash);
         streamChain(1, verifier::accept);
         return verifier.result();
     }
@@ -337,7 +348,7 @@ public final class AuditStore {
                 rs.getString("actor_id"), rs.getString("recorded_by"), rs.getString("resource_type"), rs.getString("resource_id"),
                 fromJson(rs.getString("payload"), OBJECT_MAP), fromJson(rs.getString("salts"), STRING_MAP),
                 fromJson(rs.getString("field_hashes"), STRING_MAP), rs.getString("prev_hash"),
-                rs.getString("hash"), rs.getInt("archived") == 1);
+                rs.getString("hash"), rs.getInt("archived") == 1, rs.getString("mac"));
     }
 
     private String toJson(Object value) {

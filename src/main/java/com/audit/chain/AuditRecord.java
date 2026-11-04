@@ -7,7 +7,8 @@ import java.util.Map;
  * caller); {@code recordedBy} is the authenticated principal that submitted it, sealed into the
  * hash so attribution can't be forged later. {@code salts} and {@code fieldHashes} are the per-field payload
  * commitments; a field with no salt is a redacted field. Archived records (tombstones) have
- * their content set to null but keep seq, timestamp, prevHash and hash.
+ * their content set to null but keep seq, timestamp, prevHash, hash and mac. {@code mac} is the
+ * server's HMAC over the hash; it can only be checked with the server key.
  */
 public record AuditRecord(
         long seq,
@@ -22,5 +23,6 @@ public record AuditRecord(
         Map<String, String> fieldHashes,
         String prevHash,
         String hash,
-        boolean archived) {
+        boolean archived,
+        String mac) {
 }

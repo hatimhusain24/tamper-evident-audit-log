@@ -167,9 +167,9 @@ class ScenarioAApiTest extends ApiTestBase {
     @Test
     void forgedRecordInsertedAtTheEndWithWrongLinkIsDetected() throws Exception {
         seed(3);
-        tamper("INSERT INTO events (seq, timestamp, event_type, actor_id, resource_type, resource_id, payload, salts, "
-                + "field_hashes, prev_hash, hash) VALUES (4, '2099-01-01T00:00:00.000000Z', 'X_Y', 'a', 'r', '1', '{}', "
-                + "'{}', '{}', ?, ?)", "0".repeat(64), "f".repeat(64));
+        tamper("INSERT INTO events (seq, timestamp, event_type, actor_id, recorded_by, resource_type, resource_id, "
+                + "payload, salts, field_hashes, prev_hash, hash, mac) VALUES (4, '2099-01-01T00:00:00.000000Z', 'X_Y', "
+                + "'a', 'svc', 'r', '1', '{}', '{}', '{}', ?, ?, 'forged')", "0".repeat(64), "f".repeat(64));
         assertThat(verify().<String>get("violation")).isEqualTo("CHAIN_LINK_BROKEN");
     }
 

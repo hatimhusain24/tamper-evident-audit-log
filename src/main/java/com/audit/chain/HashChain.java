@@ -101,14 +101,20 @@ public final class HashChain {
             fieldHashes.put(key, fieldHash(salts.get(key), key, value));
         });
         AuditRecord unsigned = new AuditRecord(seq, timestamp, eventType, actorId, recordedBy,
-                resourceType, resourceId, payload, salts, fieldHashes, prevHash, null, false);
+                resourceType, resourceId, payload, salts, fieldHashes, prevHash, null, false, null);
         return withHash(unsigned, recordHash(unsigned));
     }
 
     static AuditRecord withHash(AuditRecord r, String hash) {
         return new AuditRecord(r.seq(), r.timestamp(), r.eventType(), r.actorId(), r.recordedBy(),
                 r.resourceType(), r.resourceId(), r.payload(), r.salts(), r.fieldHashes(), r.prevHash(), hash,
-                r.archived());
+                r.archived(), r.mac());
+    }
+
+    public static AuditRecord withMac(AuditRecord r, String mac) {
+        return new AuditRecord(r.seq(), r.timestamp(), r.eventType(), r.actorId(), r.recordedBy(),
+                r.resourceType(), r.resourceId(), r.payload(), r.salts(), r.fieldHashes(), r.prevHash(), r.hash(),
+                r.archived(), mac);
     }
 
     /** First problem found in one record, or null if the record is consistent. */

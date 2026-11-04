@@ -23,15 +23,27 @@ public final class ChainVerifier {
     private final Set<SeqField> authorized = new HashSet<>();
     private VerifyResult failure;
     private final double minRetentionDays;
+    private final IntegrityKey key;
+    private final Long anchorSeq;
+    private final String anchorHash;
+    private boolean anchorSeen;
 
-    /** Verifier without a retention floor (offline use, tests). */
+    /** Hash-only verifier: no retention floor, no MAC key, no anchor (offline use, tests). */
     public ChainVerifier() {
-        this(0);
+        this(0, null, null, null);
     }
 
-    /** @param minRetentionDays archive runs below this window are reported as policy violations */
-    public ChainVerifier(double minRetentionDays) {
+    /**
+     * @param minRetentionDays archive runs below this window are policy violations
+     * @param key              if set, every record's MAC must match (detects full rewrites)
+     * @param anchorSeq        if set, the chain must still contain this seq with {@code anchorHash}
+     *                         (detects truncation against an externally stored head)
+     */
+    public ChainVerifier(double minRetentionDays, IntegrityKey key, Long anchorSeq, String anchorHash) {
         this.minRetentionDays = minRetentionDays;
+        this.key = key;
+        this.anchorSeq = anchorSeq;
+        this.anchorHash = anchorHash;
     }
 
     /** Returns false once a violation is found (the caller can stop reading). */
@@ -40,8 +52,17 @@ public final class ChainVerifier {
             return false;
         }
         Violation v = HashChain.safeCheck(r, prev == null ? HashChain.GENESIS_HASH : prev.hash(), checked + 1);
+        if (v == null && key != null && !key.mac(r.hash()).equals(r.mac())) {
+            v = new Violation("MAC_MISMATCH", "record was not written by this service (bad or missing MAC)");
+        }
         if (v == null && r.archived() && r.seq() != lastArchived + 1) {
             v = new Violation("UNAUTHORIZED_ARCHIVE", "tombstones must form a contiguous prefix of the chain");
+        }
+        if (v == null && anchorSeq != null && r.seq() == anchorSeq) {
+            anchorSeen = true;
+            if (!r.hash().equals(anchorHash)) {
+                v = new Violation("ANCHOR_MISMATCH", "record at the anchored seq has a different hash (rewritten)");
+            }
         }
         if (v != null) {
             failure = fail(r.seq(), v);
@@ -81,6 +102,10 @@ public final class ChainVerifier {
                 return fail(sf.seq(), new Violation("UNAUTHORIZED_REDACTION",
                         "field '" + sf.field() + "' redacted without a " + HashChain.REDACTION_EVENT + " event"));
             }
+        }
+        if (anchorSeq != null && !anchorSeen) {
+            return fail(headSeq() + 1, new Violation("ANCHOR_MISMATCH", "chain ends at seq " + headSeq()
+                    + ", before the anchored seq " + anchorSeq + " (records were removed from the end)"));
         }
         if (lastArchived > archivedThrough) {
             return fail(archivedThrough + 1, new Violation("UNAUTHORIZED_ARCHIVE", "records up to seq "

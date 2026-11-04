@@ -103,8 +103,9 @@ class RetentionTest extends ApiTestBase {
         tamper("DROP TRIGGER events_chain_immutable");
         tamper("UPDATE events SET hash = ? WHERE seq = 2", "a".repeat(64));
         Response v = verify();
-        assertThat(v.<String>get("violation")).isEqualTo("CHAIN_LINK_BROKEN");
-        assertThat(v.<Integer>get("firstInvalidSeq")).isEqualTo(3);
+        // the MAC over the hash no longer matches, so it is caught at the edited tombstone itself
+        assertThat(v.<String>get("violation")).isEqualTo("MAC_MISMATCH");
+        assertThat(v.<Integer>get("firstInvalidSeq")).isEqualTo(2);
     }
 
     @Test

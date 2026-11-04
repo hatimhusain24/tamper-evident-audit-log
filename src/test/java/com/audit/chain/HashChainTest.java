@@ -162,7 +162,7 @@ class HashChainTest {
         List<AuditRecord> c = chain(3);
         AuditRecord t = c.get(0);
         c.set(0, new AuditRecord(t.seq(), t.timestamp(), null, null, null, null, null, null, null, null,
-                t.prevHash(), t.hash(), true));
+                t.prevHash(), t.hash(), true, null));
         assertThat(HashChain.verify(c).violation()).isEqualTo("UNAUTHORIZED_ARCHIVE");
     }
 
@@ -180,7 +180,7 @@ class HashChainTest {
         List<AuditRecord> c = chain(2);
         AuditRecord t = c.get(0);
         c.set(0, new AuditRecord(t.seq(), t.timestamp(), null, null, null, null, null, null, null, null,
-                t.prevHash(), t.hash(), false));                    // archived flag cleared, content gone
+                t.prevHash(), t.hash(), false, null));                    // archived flag cleared, content gone
         assertThat(HashChain.verify(c).violation()).isEqualTo("CORRUPT_RECORD");
     }
 

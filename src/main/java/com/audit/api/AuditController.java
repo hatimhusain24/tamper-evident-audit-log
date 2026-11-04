@@ -15,6 +15,7 @@ import com.audit.store.AuditStore;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
@@ -110,10 +111,18 @@ public final class AuditController {
         return new EventPage(page.items().stream().map(r -> EventView.of(r, mask)).toList(), page.nextCursor());
     }
 
-    /** Walks the full chain: valid, first bad seq and violation type, plus head to anchor. */
+    /**
+     * Walks the full chain: hashes, MACs and policies. Returns valid, first bad seq and violation
+     * type, plus the head. Store the head externally (WORM) and pass it back as an anchor later to
+     * prove no records were removed from the end.
+     */
     @GetMapping("/audit/verify")
-    public VerifyResult verify() {
-        return store.verify();
+    public VerifyResult verify(@RequestParam(required = false) @Min(1) Long anchorSeq,
+                               @RequestParam(required = false) @Pattern(regexp = "^[0-9a-f]{64}$") String anchorHash) {
+        if ((anchorSeq == null) != (anchorHash == null)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "give both anchorSeq and anchorHash, or neither");
+        }
+        return store.verify(anchorSeq, anchorHash);
     }
 
     @PostMapping(value = "/audit/events/{seq}/redactions", consumes = MediaType.APPLICATION_JSON_VALUE)

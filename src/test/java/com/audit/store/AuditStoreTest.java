@@ -16,6 +16,7 @@ import org.sqlite.SQLiteDataSource;
 class AuditStoreTest {
 
     static final double SIX_YEARS = 2190;
+    static final String KEY = "store-test-hmac-key-0123456789abcdef";
 
     static SQLiteDataSource dataSource(Path file) {
         SQLiteDataSource ds = new SQLiteDataSource();
@@ -32,7 +33,7 @@ class AuditStoreTest {
     @Test
     void timestampsStayMonotonicWhenTheClockStepsBack(@TempDir Path dir) {
         TestClock clock = clockAt("2026-01-01T12:00:00Z");
-        AuditStore store = new AuditStore(dataSource(dir.resolve("a.db")), clock, SIX_YEARS);
+        AuditStore store = new AuditStore(dataSource(dir.resolve("a.db")), clock, SIX_YEARS, KEY);
 
         AuditRecord first = store.append("X_Y", "a", "svc", "r", "1", Map.of());
         clock.advanceDays(-1);                                    // NTP correction, VM resume, etc.
@@ -45,7 +46,7 @@ class AuditStoreTest {
     @Test
     void retentionArchivesOnlyRecordsOlderThanTheWindow(@TempDir Path dir) {
         TestClock clock = clockAt("2020-01-01T00:00:00Z");
-        AuditStore store = new AuditStore(dataSource(dir.resolve("b.db")), clock, SIX_YEARS);
+        AuditStore store = new AuditStore(dataSource(dir.resolve("b.db")), clock, SIX_YEARS, KEY);
         store.append("X_Y", "a", "svc", "r", "1", Map.of());                 // year 0
         clock.advanceDays(4 * 365);
         store.append("X_Y", "a", "svc", "r", "1", Map.of());                 // year 4
@@ -59,7 +60,7 @@ class AuditStoreTest {
 
     @Test
     void storeRefusesAWindowBelowTheFloor(@TempDir Path dir) {
-        AuditStore store = new AuditStore(dataSource(dir.resolve("c.db")), clockAt("2026-01-01T00:00:00Z"), SIX_YEARS);
+        AuditStore store = new AuditStore(dataSource(dir.resolve("c.db")), clockAt("2026-01-01T00:00:00Z"), SIX_YEARS, KEY);
         assertThatThrownBy(() -> store.archive(30, "ops")).isInstanceOf(AuditStore.PolicyViolation.class);
     }
 
@@ -67,12 +68,12 @@ class AuditStoreTest {
     void verifyFlagsAnArchiveRunBelowTheFloor(@TempDir Path dir) {
         Path file = dir.resolve("d.db");
         TestClock clock = clockAt("2026-01-01T00:00:00Z");
-        AuditStore weakDeployment = new AuditStore(dataSource(file), clock, 0);   // misconfigured once
+        AuditStore weakDeployment = new AuditStore(dataSource(file), clock, 0, KEY);   // misconfigured once
         weakDeployment.append("X_Y", "a", "svc", "r", "1", Map.of());
         clock.advanceDays(1);
         weakDeployment.archive(0, "ops");
 
-        AuditStore compliant = new AuditStore(dataSource(file), clock, SIX_YEARS);
+        AuditStore compliant = new AuditStore(dataSource(file), clock, SIX_YEARS, KEY);
         var result = compliant.verify();
         assertThat(result.valid()).isFalse();
         assertThat(result.violation()).isEqualTo("RETENTION_POLICY_VIOLATION");
