@@ -1,3 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- Every suppression is reviewed and explained. Anything new fails the build. -->
 <FindBugsFilter>
+    <!-- Records/DTOs carrying Maps and Lists, and Spring-injected beans: by design, not a defect. -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    </Match>
+    <!-- Timing-safe comparison matters for secrets (MACs, keys). Chain hashes are public
+         integrity values, so timing reveals nothing. The admin key uses MessageDigest.isEqual. -->
+    <Match>
+        <Package name="com.audit.chain"/>
+        <Bug pattern="UNSAFE_HASH_EQUALS"/>
+    </Match>
+    <!-- SQL is built only from a fixed column whitelist (query) or one of two constants (export).
+         All values are bound parameters. -->
+    <Match>
+        <Class name="com.audit.store.AuditStore"/>
+        <Or>
+            <Method name="query"/>
+            <Method name="export"/>
+        </Or>
+        <Bug pattern="SQL_INJECTION_SPRING_JDBC"/>
+    </Match>
 </FindBugsFilter>
