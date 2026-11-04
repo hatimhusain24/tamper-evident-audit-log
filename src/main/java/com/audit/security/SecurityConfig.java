@@ -1,9 +1,11 @@
 package com.audit.security;
 
+import java.time.Clock;
 import java.util.List;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,6 +22,7 @@ import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
 
 /**
  * Deny-by-default access control. Every caller authenticates (HTTP Basic, stateless) as a named
@@ -40,8 +43,11 @@ public class SecurityConfig {
     private static final Logger SECURITY_LOG = LoggerFactory.getLogger("audit.security");
 
     @Bean
-    SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain filterChain(HttpSecurity http, Clock clock,
+                                    @Value("${audit.max-request-bytes:65536}") long maxRequestBytes,
+                                    @Value("${audit.rate-limit.per-minute:600}") int perMinute) throws Exception {
         http
+            .addFilterBefore(new RequestGuardFilter(maxRequestBytes, perMinute, clock), BasicAuthenticationFilter.class)
             // Stateless JSON API: no sessions or cookies, and every POST must be application/json,
             // which a cross-site form cannot send (tested in SecurityTest).
             .csrf(csrf -> csrf.disable())

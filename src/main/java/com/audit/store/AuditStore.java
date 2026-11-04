@@ -9,6 +9,8 @@ import com.audit.chain.VerifyResult;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Clock;
@@ -69,6 +71,10 @@ public final class AuditStore {
     public record Page(List<AuditRecord> items, Long nextCursor) {
     }
 
+    /** replayed = true when an earlier request with the same idempotency key already wrote it. */
+    public record Appended(AuditRecord record, boolean replayed) {
+    }
+
     public record RetentionResult(long archivedCount, Long throughSeq, AuditRecord event) {
     }
 
@@ -91,6 +97,12 @@ public final class AuditStore {
                 hash          TEXT    NOT NULL,
                 archived      INTEGER NOT NULL DEFAULT 0,
                 mac           TEXT    NOT NULL   -- HMAC-SHA256(server key, hash)
+            )""",
+            """
+            CREATE TABLE IF NOT EXISTS idempotency_keys (
+                key          TEXT PRIMARY KEY,   -- "<principal>:<Idempotency-Key header>"
+                request_hash TEXT NOT NULL,      -- SHA-256 of the canonical request
+                seq          INTEGER NOT NULL
             )""",
             "CREATE INDEX IF NOT EXISTS ix_actor ON events(actor_id, seq)",
             "CREATE INDEX IF NOT EXISTS ix_resource ON events(resource_type, resource_id, seq)",
@@ -161,6 +173,37 @@ public final class AuditStore {
     public AuditRecord append(String eventType, String actorId, String recordedBy, String resourceType,
                               String resourceId, Map<String, Object> payload) {
         return write(() -> appendInTx(eventType, actorId, recordedBy, resourceType, resourceId, payload));
+    }
+
+    /**
+     * Append at most once per key: a retry with the same key and request returns the original
+     * record; the same key with a different request is a conflict. Checked and written in the
+     * same transaction as the append, so concurrent retries can't both write.
+     */
+    public Appended appendOnce(String idempotencyKey, String eventType, String actorId, String recordedBy,
+                               String resourceType, String resourceId, Map<String, Object> payload) {
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("eventType", eventType);
+        request.put("actorId", actorId);
+        request.put("resourceType", resourceType);
+        request.put("resourceId", resourceId);
+        request.put("payload", payload);
+        String requestHash = HashChain.sha256(HashChain.canonical(request));
+        return write(() -> {
+            List<Map<String, Object>> prior = jdbc.queryForList(
+                    "SELECT request_hash, seq FROM idempotency_keys WHERE key = ?", idempotencyKey);
+            if (!prior.isEmpty()) {
+                byte[] stored = String.valueOf(prior.get(0).get("request_hash")).getBytes(StandardCharsets.UTF_8);
+                if (!MessageDigest.isEqual(requestHash.getBytes(StandardCharsets.UTF_8), stored)) {
+                    throw new Conflict("Idempotency-Key was already used for a different request");
+                }
+                return new Appended(find(((Number) prior.get(0).get("seq")).longValue()), true);
+            }
+            AuditRecord r = appendInTx(eventType, actorId, recordedBy, resourceType, resourceId, payload);
+            jdbc.update("INSERT INTO idempotency_keys (key, request_hash, seq) VALUES (?, ?, ?)",
+                    idempotencyKey, requestHash, r.seq());
+            return new Appended(r, false);
+        });
     }
 
     private AuditRecord appendInTx(String eventType, String actorId, String recordedBy, String resourceType,

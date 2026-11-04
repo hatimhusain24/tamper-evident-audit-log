@@ -78,6 +78,7 @@ public abstract class ApiTestBase {
     void emptyLog() {
         clock.set(Instant.now());
         jdbc.execute("DROP TABLE IF EXISTS events");   // also drops the guardrail triggers
+        jdbc.execute("DROP TABLE IF EXISTS idempotency_keys");
         store.initSchema();
     }
 
