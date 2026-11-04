@@ -29,6 +29,11 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
     }
 
+    @ExceptionHandler(AuditStore.PolicyViolation.class)
+    ProblemDetail policy(AuditStore.PolicyViolation e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
+    }
+
     @ExceptionHandler(Exception.class)
     ProblemDetail unexpected(Exception e) {
         LOG.error("unhandled error", e);

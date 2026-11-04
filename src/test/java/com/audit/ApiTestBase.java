@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -13,6 +14,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -25,7 +30,20 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 /** Full Spring context + real SQLite file. Each test starts from an empty log. */
 @SpringBootTest
 @AutoConfigureMockMvc
+@Import(ApiTestBase.ClockConfig.class)
 public abstract class ApiTestBase {
+
+    /** Days that safely exceed the 6-year legal retention minimum. */
+    protected static final long SEVEN_YEARS = 7 * 365;
+
+    @TestConfiguration
+    static class ClockConfig {
+        @Bean
+        @Primary
+        TestClock testClock() {
+            return new TestClock();
+        }
+    }
 
     protected static final Path DB_DIR;
 
@@ -48,9 +66,11 @@ public abstract class ApiTestBase {
     @Autowired protected MockMvc mvc;
     @Autowired protected JdbcTemplate jdbc;
     @Autowired protected AuditStore store;
+    @Autowired protected TestClock clock;
 
     @BeforeEach
     void emptyLog() {
+        clock.set(Instant.now());
         jdbc.execute("DROP TABLE IF EXISTS events");   // also drops the guardrail triggers
         store.initSchema();
     }
@@ -108,6 +128,12 @@ public abstract class ApiTestBase {
             out.add(post("/audit/events", event(i)));
         }
         return out;
+    }
+
+    /** Move time past the legal minimum, then archive everything older than it. */
+    protected Response archiveAfterSevenYears() throws Exception {
+        clock.advanceDays(SEVEN_YEARS);
+        return post("/audit/retention/run", Map.of("olderThanDays", 2190, "requestedBy", "ops-1"));
     }
 
     protected Response verify() throws Exception {

@@ -22,6 +22,17 @@ public final class ChainVerifier {
     private final List<SeqField> redacted = new ArrayList<>();
     private final Set<SeqField> authorized = new HashSet<>();
     private VerifyResult failure;
+    private final double minRetentionDays;
+
+    /** Verifier without a retention floor (offline use, tests). */
+    public ChainVerifier() {
+        this(0);
+    }
+
+    /** @param minRetentionDays archive runs below this window are reported as policy violations */
+    public ChainVerifier(double minRetentionDays) {
+        this.minRetentionDays = minRetentionDays;
+    }
 
     /** Returns false once a violation is found (the caller can stop reading). */
     public boolean accept(AuditRecord r) {
@@ -46,6 +57,12 @@ public final class ChainVerifier {
                 long target = ((Number) p.get("targetSeq")).longValue();
                 ((List<?>) p.get("fields")).forEach(f -> authorized.add(new SeqField(target, (String) f)));
             } else if (HashChain.ARCHIVE_EVENT.equals(r.eventType())) {
+                double window = ((Number) p.get("olderThanDays")).doubleValue();
+                if (window < minRetentionDays) {
+                    failure = fail(r.seq(), new Violation("RETENTION_POLICY_VIOLATION", "archive run used a "
+                            + window + "-day window, below the " + minRetentionDays + "-day minimum"));
+                    return false;
+                }
                 archivedThrough = Math.max(archivedThrough, ((Number) p.get("throughSeq")).longValue());
             }
         }

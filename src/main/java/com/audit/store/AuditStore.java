@@ -23,6 +23,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import javax.sql.DataSource;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -53,6 +54,13 @@ public final class AuditStore {
     /** Operation not allowed in the record's current state (HTTP 409). */
     public static final class Conflict extends RuntimeException {
         public Conflict(String message) {
+            super(message);
+        }
+    }
+
+    /** Request breaks a data policy, e.g. retention below the legal minimum (HTTP 400). */
+    public static final class PolicyViolation extends RuntimeException {
+        public PolicyViolation(String message) {
             super(message);
         }
     }
@@ -109,12 +117,19 @@ public final class AuditStore {
     private final Clock clock;
     private final ObjectMapper json = new ObjectMapper();
     private final ReentrantLock writeLock = new ReentrantLock();
+    private final double retentionMinDays;
 
-    public AuditStore(DataSource dataSource, Clock clock) {
+    public AuditStore(DataSource dataSource, Clock clock,
+                      @Value("${audit.retention-min-days:2190}") double retentionMinDays) {
         this.jdbc = new JdbcTemplate(dataSource);
         this.tx = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
         this.clock = clock;
+        this.retentionMinDays = retentionMinDays;
         initSchema();
+    }
+
+    public double retentionMinDays() {
+        return retentionMinDays;
     }
 
     public void initSchema() {
@@ -204,9 +219,14 @@ public final class AuditStore {
      * Retention: turn records older than the window into tombstones. A tombstone keeps
      * seq/timestamp/prevHash/hash so chain links still verify; content is purged. Timestamps are
      * monotonic, so "older than cutoff" is always a contiguous prefix. The run is authorized by
-     * a chained RECORDS_ARCHIVED event; verify flags tombstones beyond its throughSeq.
+     * a chained RECORDS_ARCHIVED event; verify flags tombstones beyond its throughSeq. A window
+     * below the legal minimum is refused here and flagged by verify if it ever gets in.
      */
     public RetentionResult archive(double olderThanDays, String requestedBy) {
+        if (olderThanDays < retentionMinDays) {
+            throw new PolicyViolation("olderThanDays must be at least the " + retentionMinDays
+                    + "-day legal minimum");
+        }
         String cutoff = iso(clock.instant().minus(Duration.ofSeconds(Math.round(olderThanDays * 86_400))));
         return write(() -> {
             Map<String, Object> row = jdbc.queryForMap(
@@ -274,7 +294,7 @@ public final class AuditStore {
     }
 
     public VerifyResult verify() {
-        ChainVerifier verifier = new ChainVerifier();
+        ChainVerifier verifier = new ChainVerifier(retentionMinDays);
         streamChain(1, verifier::accept);
         return verifier.result();
     }

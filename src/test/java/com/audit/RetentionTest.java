@@ -10,14 +10,14 @@ import org.junit.jupiter.api.Test;
 class RetentionTest extends ApiTestBase {
 
     Response archiveAll() throws Exception {
-        return post("/audit/retention/run", Map.of("olderThanDays", 0, "requestedBy", "ops-1"));
+        return archiveAfterSevenYears();
     }
 
     @Test
     void defaultWindowKeepsRecentRecords() throws Exception {
         seed(3);
         Response res = call(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/audit/retention/run"));
-        assertThat(res.<Integer>get("archivedCount")).isZero();      // 365-day default, no body needed
+        assertThat(res.<Integer>get("archivedCount")).isZero();      // 6-year default, no body needed
         assertThat(res.body().get("event")).isNull();
     }
 
@@ -68,6 +68,33 @@ class RetentionTest extends ApiTestBase {
     @Test
     void negativeWindowIsRejected() throws Exception {
         assertThat(post("/audit/retention/run", Map.of("olderThanDays", -1)).status()).isEqualTo(400);
+    }
+
+    @Test
+    void windowBelowTheLegalMinimumIsRejected() throws Exception {
+        seed(5);
+        Response res = post("/audit/retention/run", Map.of("olderThanDays", 0, "requestedBy", "attacker"));
+        assertThat(res.status()).isEqualTo(400);
+        assertThat(res.<String>get("detail")).contains("2190");
+        assertThat(get("/audit/events").items()).hasSize(5);                // nothing purged
+        assertThat(post("/audit/retention/run", Map.of("olderThanDays", 2189.9)).status()).isEqualTo(400);
+    }
+
+    @Test
+    void recordsYoungerThanTheMinimumAreNeverArchived() throws Exception {
+        seed(3);
+        clock.advanceDays(5 * 365);                                        // only 5 years later
+        assertThat(post("/audit/retention/run", Map.of("olderThanDays", 2190)).<Integer>get("archivedCount")).isZero();
+    }
+
+    @Test
+    void untombstonedRecordIsReportedAsCorrupt() throws Exception {
+        seed(2);
+        archiveAll();
+        tamper("UPDATE events SET archived = 0 WHERE seq = 1");            // content already purged
+        Response v = verify();
+        assertThat(v.<String>get("violation")).isEqualTo("CORRUPT_RECORD");
+        assertThat(v.<Integer>get("firstInvalidSeq")).isEqualTo(1);
     }
 
     @Test

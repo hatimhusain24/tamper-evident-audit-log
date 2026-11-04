@@ -35,7 +35,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 /** Append-only audit API. There is deliberately no update or delete endpoint. */
 @RestController
-public class AuditController {
+public final class AuditController {
 
     static final int MAX_PAYLOAD_BYTES = 32 * 1024;
 
@@ -46,7 +46,11 @@ public class AuditController {
 
     public AuditController(AuditStore store, AccessReportService reports,
                            @Value("${audit.admin-key:}") String adminKey,
-                           @Value("${audit.retention-days:365}") double retentionDays) {
+                           @Value("${audit.retention-days:2190}") double retentionDays) {
+        if (retentionDays < store.retentionMinDays()) {   // fail fast on an unsafe deployment
+            throw new IllegalStateException("audit.retention-days (" + retentionDays
+                    + ") is below audit.retention-min-days (" + store.retentionMinDays() + ")");
+        }
         this.store = store;
         this.reports = reports;
         this.adminKey = adminKey.getBytes(StandardCharsets.UTF_8);
