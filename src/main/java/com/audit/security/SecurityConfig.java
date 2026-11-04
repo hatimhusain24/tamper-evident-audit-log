@@ -50,11 +50,17 @@ public class SecurityConfig {
     SecurityFilterChain filterChain(HttpSecurity http, Clock clock, AuditSecurityProperties props,
                                     @Value("${audit.max-request-bytes:65536}") long maxRequestBytes,
                                     @Value("${audit.rate-limit.per-minute:600}") int perMinute,
-                                    @Value("${audit.trusted-proxies:}") Set<String> trustedProxies) throws Exception {
+                                    @Value("${audit.trusted-proxies:}") Set<String> trustedProxies,
+                                    @Value("${audit.rate-limit.store:memory}") String limiterStore,
+                                    javax.sql.DataSource dataSource) throws Exception {
         props.validate();
+        limiterCheck(limiterStore);
+        RateLimiter limiter = "database".equals(limiterStore)
+                ? RateLimiter.database(new org.springframework.jdbc.core.JdbcTemplate(dataSource))
+                : RateLimiter.inMemory();
         http
             // limits run before any authentication, so floods and credential guessing are throttled
-            .addFilterAfter(new RequestGuardFilter(maxRequestBytes, perMinute, clock, trustedProxies),
+            .addFilterAfter(new RequestGuardFilter(maxRequestBytes, perMinute, clock, trustedProxies, limiter),
                     SecurityContextHolderFilter.class)
             .addFilterBefore(new LogContextFilter(), AuthorizationFilter.class)
             // Stateless JSON API: no sessions or cookies, and every POST must be application/json,
@@ -84,6 +90,13 @@ public class SecurityConfig {
             http.httpBasic(basic -> { });
         }
         return http.build();
+    }
+
+    /** Only the two supported limiter stores; anything else refuses to start. */
+    public void limiterCheck(String store) {
+        if (!"memory".equals(store) && !"database".equals(store)) {
+            throw new IllegalStateException("audit.rate-limit.store must be memory or database (was " + store + ")");
+        }
     }
 
     /** The startup checks of {@link #filterChain}, callable without a web context (tests). */

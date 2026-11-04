@@ -12,8 +12,6 @@ import java.io.IOException;
 import java.time.Clock;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -32,7 +30,6 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public final class RequestGuardFilter extends OncePerRequestFilter {
 
     private static final Logger SECURITY_LOG = LoggerFactory.getLogger("audit.security");
-    private static final int MAX_TRACKED_CLIENTS = 10_000;
     private static final ObjectMapper JSON = new ObjectMapper();
 
     /** Thrown while reading a body that exceeds the limit; mapped to HTTP 413. */
@@ -42,20 +39,23 @@ public final class RequestGuardFilter extends OncePerRequestFilter {
         }
     }
 
-    private record Window(long minute, AtomicInteger count) {
-    }
-
     private final long maxBodyBytes;
     private final int requestsPerMinute;
     private final Clock clock;
     private final Set<String> trustedProxies;
-    private final Map<String, Window> windows = new ConcurrentHashMap<>();
+    private final RateLimiter limiter;
 
     public RequestGuardFilter(long maxBodyBytes, int requestsPerMinute, Clock clock, Set<String> trustedProxies) {
+        this(maxBodyBytes, requestsPerMinute, clock, trustedProxies, RateLimiter.inMemory());
+    }
+
+    public RequestGuardFilter(long maxBodyBytes, int requestsPerMinute, Clock clock, Set<String> trustedProxies,
+                              RateLimiter limiter) {
         this.maxBodyBytes = maxBodyBytes;
         this.requestsPerMinute = requestsPerMinute;
         this.clock = clock;
         this.trustedProxies = Set.copyOf(trustedProxies);
+        this.limiter = limiter;
     }
 
     /** The rightmost X-Forwarded-For address that is not a trusted proxy, if the caller is one. */
@@ -93,13 +93,7 @@ public final class RequestGuardFilter extends OncePerRequestFilter {
     }
 
     private boolean allow(String client) {
-        long minute = clock.millis() / 60_000;
-        if (windows.size() > MAX_TRACKED_CLIENTS) {
-            windows.clear();   // bounded memory; worst case a client gets a fresh window
-        }
-        Window w = windows.compute(client, (k, old) ->
-                old == null || old.minute() != minute ? new Window(minute, new AtomicInteger()) : old);
-        return w.count().incrementAndGet() <= requestsPerMinute;
+        return limiter.increment(client, clock.millis() / 60_000) <= requestsPerMinute;
     }
 
     /** RFC 7807 body, serialized by Jackson (proper JSON escaping, never hand-built strings). */
