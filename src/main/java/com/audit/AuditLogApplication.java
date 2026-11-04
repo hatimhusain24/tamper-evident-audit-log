@@ -1,12 +1,16 @@
 package com.audit;
 
 import com.audit.chain.BundleVerifierCli;
+import io.swagger.v3.oas.annotations.OpenAPIDefinition;
+import io.swagger.v3.oas.annotations.info.Info;
 import java.time.Clock;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 
 @SpringBootApplication
+@OpenAPIDefinition(info = @Info(title = "Tamper-Evident Audit Log", version = "1.0.0",
+        description = "Append-only, hash-chained audit events. No update or delete API."))
 public class AuditLogApplication {
 
     /**
