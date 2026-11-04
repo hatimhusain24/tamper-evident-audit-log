@@ -93,12 +93,12 @@ Tick a box by editing this file on GitHub (pencil icon) or locally: change `[ ]`
 
 Re-review needed: the earlier ticks applied to the Python version, which has been replaced.
 
-- [ ] Hash/chain format (`chain/HashChain`, `ChainVerifier`), commit `9a6bd6e`
-- [ ] Write path, timestamps, concurrency (`store/AuditStore`), commit `6a0dc2a`
-- [ ] Redaction scheme and physical erasure, commits `6a0dc2a`, `2a34015`
-- [ ] Retention tombstones and authorization, commits `6a0dc2a`, `2a34015`
-- [ ] Export bundle format and offline verifier, commits `6a0dc2a`, `2a34015`
-- [ ] Scenario C assumptions and scope, commits `15c4754`, `09d65b9`
+- [x] Hash/chain format (`chain/HashChain`, `ChainVerifier`), commit `9a6bd6e`
+- [x] Write path, timestamps, concurrency (`store/AuditStore`), commit `6a0dc2a`
+- [x] Redaction scheme and physical erasure, commits `6a0dc2a`, `2a34015`
+- [x] Retention tombstones and authorization, commits `6a0dc2a`, `2a34015`
+- [x] Export bundle format and offline verifier, commits `6a0dc2a`, `2a34015`
+- [x] Scenario C assumptions and scope, commits `15c4754`, `09d65b9`
 
 ## 5. Engineer review log (engineer appends entries during review / rework)
 
