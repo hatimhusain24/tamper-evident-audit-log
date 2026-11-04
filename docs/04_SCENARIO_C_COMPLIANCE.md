@@ -37,7 +37,8 @@ system to be buildable and testable:
 4. `integrity` reflects `GET /audit/verify`. A tampered log makes the report say so.
 5. A `COMPLIANCE_REPORT_GENERATED` event is appended with requester, scope and `reportDigest`,
    and `reportDigest == sha256(canonical(report without reportEvent))`.
-6. Endpoint is admin-gated (same `X-Admin-Key` control as other high-impact operations).
+6. Only the COMPLIANCE role can generate reports, and the generator is the authenticated user
+   (not a request field).
 
 ## 3. Producer contract (event taxonomy)
 
@@ -51,7 +52,8 @@ Applications that touch client account data emit:
 
 ## 4. Design
 
-`GET /audit/reports/account-access?accountId=&from=&to=&requestedBy=`
+`POST /audit/reports/account-access` with body `{"accountId", "from", "to"}` (all optional), role
+COMPLIANCE. It is a POST because generating a report writes a chained event.
 
 1. Run full chain verification and put the result in `integrity`.
 2. Page through the existing query API (`resourceType=CLIENT_ACCOUNT` plus filters), reusing the

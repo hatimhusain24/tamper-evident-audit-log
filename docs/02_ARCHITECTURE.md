@@ -21,7 +21,8 @@
 
 **Design rule:** all cryptographic logic sits in one I/O-free package (`chain`). The service, the
 tests and an external recipient's offline verifier run *the same code*. That keeps the security
-core small (~280 lines), easy to review and easy to unit-test.
+core small (~490 lines including records and the CLI), easy to review and easy to unit-test.
+`security/` holds access control and request guards, so the controller has no auth logic.
 
 ## 2. Data model (single table `events`)
 
@@ -29,23 +30,28 @@ core small (~280 lines), easy to review and easy to unit-test.
 |---|---|
 | `seq` INTEGER PK | Dense 1..n. Gaps mean deletion. Part of the hash, so re-ordering is detected |
 | `timestamp` | Server-assigned UTC `YYYY-MM-DDTHH:MM:SS.ffffffZ`, monotonic (fixed width, so lexical = chronological) |
-| `event_type, actor_id, resource_type, resource_id` | Indexed with `seq` for keyset queries |
+| `event_type, actor_id, resource_type, resource_id` | Indexed with `seq` for keyset queries. `actor_id` = who the event is about, as asserted by the submitter |
+| `recorded_by` | The **authenticated** submitter (from Spring Security), inside the hash: attribution can't be forged |
 | `payload` JSON | Event detail. Redacted fields hold `"[REDACTED]"` |
 | `salts` JSON | `{field: 128-bit random salt}`. **A missing salt marks a redacted field** |
 | `field_hashes` JSON | `{field: SHA-256(salt ‖ canonical([field, value]))}`: the payload commitments |
 | `prev_hash`, `hash` | The chain |
+| `mac` | `HMAC-SHA256(server key, hash)`: only the service can produce it |
 | `archived` | 1 = retention tombstone (content NULLed, chain columns kept) |
 
-DB triggers reject `DELETE` and updates to `seq/timestamp/prev_hash/hash`. These are **guardrails
-against application bugs**. Someone with DB admin rights can drop them, which is why detection
-relies on the hash chain, not on the triggers.
+A second table, `idempotency_keys (key, request_hash, seq)`, makes retried writes safe.
+
+DB triggers reject `DELETE` and updates to `seq/timestamp/prev_hash/hash/mac`. These are
+**guardrails against application bugs**. Someone with DB admin rights can drop them, which is why
+detection relies on the hash chain and MACs, not on the triggers.
 
 ## 3. Hash chain design
 
 ```
 fieldHashes[k] = SHA256( salt_k ‖ canonical([k, payload[k]]) )
-hash_n         = SHA256( canonical({seq, timestamp, eventType, actorId, resourceType,
+hash_n         = SHA256( canonical({seq, timestamp, eventType, actorId, recordedBy, resourceType,
                                     resourceId, fieldHashes, prevHash = hash_{n-1}}) )
+mac_n          = HMAC-SHA256( serverKey, hash_n )
 hash_0 (genesis prevHash) = "000…0" (64 hex)
 ```
 
@@ -56,6 +62,14 @@ hash_0 (genesis prevHash) = "000…0" (64 hex)
   stop there. With it inside, any edit cascades to the head.
 * **`seq` is inside the hash**, so swapping two records is detected even if their links are
   re-pointed.
+* **The MAC is separate from the hash on purpose.** Anyone can recompute a SHA-256 chain, because
+  the algorithm is public, so a DB admin could rewrite everything consistently. They can't produce
+  MACs without the key (from `AUDIT_HMAC_KEY`, a secret manager / KMS in production), so a full
+  rewrite fails as `MAC_MISMATCH`. Keeping the plain hash chain means export recipients can still
+  verify offline without the key.
+* **Truncation** of the newest records can't be detected from inside the log. `verify` returns
+  `headSeq/headHash`; store them periodically in WORM storage and pass them back as
+  `anchorSeq/anchorHash`, and missing tail records are reported as `ANCHOR_MISMATCH`.
 
 ### Hash algorithm choice: SHA-256
 
@@ -64,7 +78,7 @@ hash_0 (genesis prevHash) = "000…0" (64 hex)
 | **SHA-256** ✅ | FIPS 180-4 approved (matters in a regulated broker-dealer), built into the JDK and every HSM, 128-bit collision resistance, ~0.03 ms per record here |
 | SHA-3 / BLAKE2/3 | Equally secure; BLAKE3 is faster, but neither is a plain JDK/FIPS default everywhere. No benefit at this scale |
 | MD5 / SHA-1 | Broken collision resistance. Rejected |
-| HMAC-SHA-256 (keyed) | Stops a DB admin from **recomputing** the chain, but key management (KMS/HSM, rotation) is out of scope. Listed as the first production hardening step (§6) |
+| HMAC-SHA-256 (keyed) | **Added as a per-record MAC** next to the plain hash (see above). Key rotation is not implemented yet |
 
 ### Linear chain vs Merkle tree
 
@@ -107,6 +121,19 @@ verify conservatively reports the whole prefix from seq 1 as unprovable.
 *Rejected alternative:* moving rows to another table and starting a new genesis. That needs
 signed checkpoints to bridge the two chains, which is more moving parts.
 
+### Retention floor
+
+`audit.retention-min-days` (default 2190 = 6 years, SEC 17a-4) is enforced in `AuditStore.archive`,
+so no caller, including an admin, can archive younger records. The app refuses to start if the
+default window is below the floor, and `verify` reports any archive event below the floor as
+`RETENTION_POLICY_VIOLATION`.
+
+### Corrupt records
+
+A row whose JSON can't be parsed or whose required columns are NULL is reported by verify as
+`CORRUPT_RECORD` at that seq. Queries still return it, with `payload: null`, and the compliance
+report notes it in `integrity`. Nothing bad data can do turns verify into an HTTP 500.
+
 ### Export bundle
 
 `{records (with salts), chain: [{seq, prevHash, hash}] first→head, head}`. The offline verifier
@@ -122,9 +149,38 @@ changed since export.
   stable while new events are appended. OFFSET pagination would skip or duplicate rows under
   concurrent writes.
 * Time range is `[from, to)`, so adjacent windows never double-count.
-* Reserved system event types (`RECORD_REDACTED`, `RECORDS_ARCHIVED`) are rejected on the public
-  write path, so callers can't forge an authorization.
-* Errors (RFC 7807 problem details): 400 validation, 404 unknown seq, 409 invalid state (e.g. already redacted), 401 bad admin key.
+* Reserved system event types (`RECORD_REDACTED`, `RECORDS_ARCHIVED`, `COMPLIANCE_REPORT_GENERATED`)
+  are rejected on the public write path, so callers can't forge an authorization or a report.
+* The access report is a **POST**: generating it writes a chained event, so it must not be a GET
+  (crawlers, prefetch and retries would write to the log).
+* Every POST requires `application/json`, which a cross-site form can't send (CSRF defence for a
+  stateless API).
+* `Idempotency-Key` on writes: a retry returns the original record (200); the same key with a
+  different body is 409.
+* Errors (RFC 7807 problem details): 400 validation or policy · 401 credentials · 403 role ·
+  404 unknown seq · 409 invalid state · 413 body too large · 415 not JSON · 429 rate limit ·
+  503 database busy (retryable) · 500 generic, logged, never a stack trace.
+* No `/v1` prefix yet: there is one consumer. Versioning would be a path prefix once external
+  clients exist.
+
+## 5b. Security design
+
+| Control | Implementation |
+|---|---|
+| Framework | Spring Security filter chain, **deny by default** (`anyRequest().denyAll()`) |
+| Authentication | Stateless HTTP Basic; users from config with `{bcrypt}` hashes only. No users, plaintext passwords or unknown roles → **the app won't start** |
+| Authorisation | WRITER: append · READER: query, verify (masked) · COMPLIANCE: unmasked query, export, reports · ADMIN: redaction, retention, query, verify, metrics. Export is COMPLIANCE only (least privilege) |
+| Attribution | `recordedBy` = authenticated name, in the hash. `requestedBy` is never read from a body |
+| Sensitive data | Configurable fields (`ssn`, `accountNumber`, …) masked for READER; display only, hashes unchanged |
+| Abuse limits | Per-IP rate limit (429) and 64 KB body limit (413), both **before** authentication, so password guessing is throttled too |
+| Integrity key | `AUDIT_HMAC_KEY` ≥ 32 bytes, required at startup |
+| Headers | Spring Security defaults: `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Cache-Control: no-store`; HSTS over HTTPS |
+| Logging | `audit.security` log: auth failures, access denied, tamper detected (ERROR), redactions, retention runs, rate limiting. Caller text is sanitized (no log injection) |
+| Exposure | Swagger and the API schema are off unless the `dev` profile is active; `/actuator/health` shows status only |
+| Supply chain | SpotBugs + FindSecBugs in the build; Dependabot weekly |
+
+Upgrading to OAuth2/OIDC tokens or mTLS changes only `SecurityConfig`; the chain package doesn't
+know about identity at all.
 
 ## 6. Threat model
 
@@ -135,15 +191,22 @@ changed since export.
 | Delete / insert / reorder records | ✅ | `SEQUENCE_GAP` / `CHAIN_LINK_BROKEN` |
 | Fake redaction or archival in the DB | ✅ | `UNAUTHORIZED_REDACTION` / `UNAUTHORIZED_ARCHIVE` |
 | Forge system events via the API | ✅ | Rejected (400) |
-| **Truncate the newest records** | ⚠️ only with an anchor | Compare `headSeq/headHash` with an external checkpoint |
-| **Full chain rewrite by someone with DB access** (the algorithm is public) | ⚠️ only with an anchor or key | Production: HMAC/signing key in KMS, plus periodic head anchoring to WORM storage or a separate system |
+| Full chain rewrite by someone with DB access (the hash algorithm is public) | ✅ | Per-record MAC with the server key → `MAC_MISMATCH` |
+| Truncate the newest records | ✅ with an anchor | `verify?anchorSeq=&anchorHash=` against a head stored externally → `ANCHOR_MISMATCH` |
+| Archive records younger than the legal minimum | ✅ | Refused (400); verify flags `RETENTION_POLICY_VIOLATION` |
+| Anonymous or wrong-role access, forged submitter | ✅ | Spring Security roles; `recordedBy` from the login |
+| Corrupt or unparseable row | ✅ | `CORRUPT_RECORD` at that seq; reads keep working |
+| **Attacker who also steals the HMAC key** | ⚠️ | Keep the key in a KMS/HSM, outside the DB host; anchor heads externally |
 
-**Failure scenarios handled:** concurrent writers (serialized; tested with 8 threads), clock
-stepping backwards (timestamp clamped monotonic), crash mid-redaction or mid-archive (one
-transaction, so the redaction and its audit event commit atomically), oversized payloads (32 KB cap).
+**Failure scenarios handled (each tested):** concurrent writers (serialized; 80 writes from an
+8-thread pool), clock stepping backwards (timestamp clamped monotonic), an insert failing
+mid-redaction or mid-archive (one transaction, rolled back by fault injection), database locked by
+another process (503 + Retry-After, pool stays healthy), corrupt rows (`CORRUPT_RECORD`), oversized
+bodies (413 before parsing) and payloads (32 KB cap), duplicate retries (idempotency key).
 
 ## 7. Production evolution
 
-Postgres (only `AuditStore` changes), HMAC/Ed25519 signing via KMS, signed periodic checkpoints
-(incremental verify from the last checkpoint instead of O(n)), Merkle proofs for exports, authN
-(OIDC/mTLS) with RBAC, structured logging and metrics.
+Postgres (only `AuditStore` changes), key rotation and KMS-held HMAC keys, signed periodic
+checkpoints written to WORM storage automatically (incremental verify from the last checkpoint
+instead of O(n)), Merkle proofs and per-filter commitments for complete exports, OIDC tokens
+instead of Basic, field-level encryption of PII at rest, and a distributed rate limiter.

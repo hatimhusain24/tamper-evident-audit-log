@@ -27,8 +27,9 @@ operations: **retention archival** and **field-level redaction**. It must also s
 
 ## 3. Ambiguities identified & assumptions
 
-1. **Who may write?** Assumed: trusted internal services. AuthN is out of scope for the prototype.
-   Admin operations (redact, archive) can be protected by an `X-Admin-Key` header.
+1. **Who may write and read?** First assumed: trusted internal services, with authN out of scope.
+   **Revised after review:** an audit log of client-data access must control access to itself.
+   Every endpoint now requires an authenticated user with a role (see §5).
 2. **Threat model.** Detect tampering by someone with *write access to the data store* who does
    **not** control the service's code or an external anchor of the chain head. A full chain rewrite
    by a DB admin can't be detected by an unkeyed hash chain alone. This is documented, with
@@ -39,6 +40,19 @@ operations: **retention archival** and **field-level redaction**. It must also s
    redactable. They are identifiers needed for querying, so they should not carry PII values.
 5. **Scale**: prototype on SQLite (one file, zero setup). The storage module is the only part that
    would change for Postgres.
+
+## 3b. Non-functional requirements (added after review)
+
+| NFR | Requirement |
+|---|---|
+| Authentication | Every endpoint except status health requires credentials; the service won't start without configured users |
+| Authorisation | Least privilege per role; reads of raw PII and bulk export limited to COMPLIANCE |
+| Attribution | The submitter is the authenticated identity, sealed into the record hash |
+| Retention floor | No record younger than the legal minimum (default 6 years) can be archived |
+| Integrity key | Records carry a MAC with a server-held key; truncation detectable against external anchors |
+| Availability | Rate limit and body-size limit per client; a busy database returns a retryable 503 |
+| Failure behaviour | Corrupt or unreadable rows are reported as `CORRUPT_RECORD` at their seq, never as HTTP 500; failed writes leave no partial state |
+| Observability | Security events logged; tamper detection counted as a metric; health includes a DB check |
 
 ## 4. Task decomposition (sequenced, with acceptance criteria)
 
@@ -53,3 +67,4 @@ operations: **retention archival** and **field-level redaction**. It must also s
 | T7 | Export bundle + offline verifier (Scenario B) | T5, T6 | Bundle verifies offline; edited bundle fails |
 | T8 | Scenario C clarification → access report | T4 | Clarified requirement doc; report endpoint + tests |
 | T9 | Architecture, testing, AI log, summary docs | all | Every deliverable in §7 of the brief is present |
+| T10 | Rework from the evaluation: corrupt records, retention floor, Spring Security, MACs + anchor, observability and limits, fault-injection tests, coverage gate, docs | T1–T9 | Each scorecard finding has a fix and a regression test (`05_AI_USAGE_LOG.md` §6) |
