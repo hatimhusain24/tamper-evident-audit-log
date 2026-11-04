@@ -9,6 +9,8 @@
 | **Integration (Spring + real SQLite + real auth)** | Every endpoint through MockMvc with HTTP Basic users on a real database file | `ScenarioAApiTest` (28), `RedactionTest` (8), `RetentionTest` (12), `ExportTest` (15), `ComplianceReportTest` (7) |
 | **Security** | Endpoint × role × outcome matrix, anonymous access, wrong passwords, spoofing, masking, headers incl. HSTS, CSRF, versioned paths, fail-closed config | `SecurityTest` (50) |
 | **Adversarial integrity** | Raw SQL bypassing the API and triggers; full chain rewrite; tail truncation; key validation | `tamper(...)` in `ApiTestBase`, `IntegrityKeyTest` (9) |
+| **Object-level authorization** | Scoped reader sees only its accounts, cross-account queries return nothing, scoped pagination, LIKE-wildcard escaping, scoped writer and bulk-operation denials, startup validation | `ResourceScopeTest` (8) |
+| **Structured logging** | Tamper alert as a JSON line with user and request id; no password in failed-login logs; newline injection | `StructuredLoggingTest` (3) |
 | **Checkpoints** | Signed checkpoints, automatic truncation detection, edited checkpoint file, no checkpoint of broken chains | `CheckpointTest` (8) |
 | **Encryption at rest** | No plaintext PII in raw DB files, plaintext via API, redaction, tampered ciphertext, wrong key | `EncryptionAtRestTest` (7) |
 | **Corrupt data** | Unreadable JSON, NULL columns, non-hex salts, un-archived tombstones → `CORRUPT_RECORD`, reads keep working | `CorruptRecordTest` (8) |
@@ -17,7 +19,7 @@
 | **Boundaries** | Last allowed value passes, one more fails (32 KB payload, 128-char ids, 64-char type, 50 fields, 500-char reason, page 500) | `BoundaryTest` (6) |
 | **Concurrency** | 80 writes from an 8-thread pool, then full verify; 16 concurrent retries with one key | `concurrentWritersNeverForkTheChain`, `concurrentRetriesWriteExactlyOnce` |
 
-**207 tests, 0 skipped, about 1.5 minutes.** No mocks: tests use the real database, real Spring
+**218 tests, 0 skipped, about 1.5 minutes.** No mocks: tests use the real database, real Spring
 Security and real HTTP Basic. Tests assert the **exact violation and location** (`violation`,
 `firstInvalidSeq`), not only `valid == false`. Time-dependent behaviour (6-year retention, rate
 windows, clock corrections) runs on a movable `TestClock`, so the real legal floor is tested
@@ -32,9 +34,9 @@ but fails the signature.
 
 | Counter | Covered | Gate |
 |---|---|---|
-| Line | **96.0%** | ≥ 90% |
-| Branch | **91.1%** | ≥ 85% |
-| Method | **98.0%** | — |
+| Line | **96.3%** | ≥ 90% |
+| Branch | **91.0%** | ≥ 85% |
+| Method | **98.1%** | — |
 
 Report: `target/site/jacoco/index.html` locally; the `reports` artifact of each CI run.
 Uncovered lines are mostly `AuditLogApplication.main` and defensive branches for JVM-guaranteed
@@ -45,6 +47,7 @@ algorithms (`NoSuchAlgorithmException` for SHA-256 / HmacSHA256).
 | Risk | Covered by |
 |---|---|
 | Anonymous or wrong-role access to any endpoint | `SecurityTest` matrix (7 endpoints × 4 roles + anonymous) |
+| Reading or writing another client's records (IDOR / BOLA) | `ResourceScopeTest` |
 | Forged attribution | `recordedByIsTheAuthenticatedUserAndCannotBeSpoofed`, `systemEventTypesCannotBeWrittenByCallers` |
 | Evidence destruction through retention | `windowBelowTheLegalMinimumIsRejected`, `verifyFlagsAnArchiveRunBelowTheFloor` |
 | DB admin rewrites or truncates the chain | `fullRewriteFoolsAPlainHashChainButNotTheMac`, `truncationAfterACheckpointIsCaughtByAPlainVerify` |

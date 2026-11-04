@@ -176,7 +176,8 @@ after export, which the hashes alone can't show.
 |---|---|
 | Framework | Spring Security filter chain, **deny by default** (`anyRequest().denyAll()`) |
 | Authentication | Stateless HTTP Basic; users from config with `{bcrypt}` hashes only. No users, plaintext passwords or unknown roles → **the app won't start** |
-| Authorisation | WRITER: append · READER: query, verify (masked) · COMPLIANCE: unmasked query, export, reports · ADMIN: redaction, retention, query, verify, metrics. Export is COMPLIANCE only (least privilege) |
+| Authorisation (function level) | WRITER: append · READER: query, verify (masked) · COMPLIANCE: unmasked query, export, reports · ADMIN: redaction, retention, query, verify, metrics. Export is COMPLIANCE only (least privilege) |
+| Authorisation (object level) | Resource scopes per user (`TYPE:ID` or `TYPE:PREFIX*`). READERs must have scopes; queries are filtered in SQL to the scopes (LIKE wildcards escaped); scoped writers only write their own resources; bulk operations need an unscoped user. Prevents IDOR / BOLA |
 | Attribution | `recordedBy` = authenticated name, in the hash. `requestedBy` is never read from a body |
 | Sensitive data | Configurable fields (`ssn`, `accountNumber`, …) masked for READER; display only, hashes unchanged |
 | Abuse limits | Per-client rate limit (429) and 64 KB body limit (413), both **before** authentication, so password guessing is throttled too. Behind a load balancer the client IP comes from `X-Forwarded-For`, trusted only from `audit.trusted-proxies` |
@@ -184,7 +185,7 @@ after export, which the hashes alone can't show.
 | Data at rest | Sensitive fields AES-256-GCM encrypted; redacted values physically erased (`secure_delete` + WAL checkpoint) |
 | Transport | TLS at the load balancer, or the `tls` profile (TLS 1.3/1.2); HSTS on HTTPS |
 | Headers | Spring Security defaults: `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Cache-Control: no-store`; HSTS over HTTPS |
-| Logging | `audit.security` log: auth failures, access denied, tamper detected (ERROR), redactions, retention runs, rate limiting. Caller text is sanitized (no log injection) |
+| Logging | JSON (ECS) logs with `user.name` and `request.id` on every line (`X-Request-Id` header). `audit.security` log: auth failures, access denied, out-of-scope attempts, tamper detected (ERROR), redactions, retention runs, rate limiting. Caller text is sanitized (no log injection) |
 | Exposure | Swagger and the API schema are off unless the `dev` profile is active; `/actuator/health` shows status only |
 | Supply chain | SpotBugs + FindSecBugs in the build; Dependabot weekly; OWASP dependency-check weekly (CVSS ≥ 7 fails) |
 
@@ -207,6 +208,7 @@ know about identity at all.
 | Read PII straight from the database file | ✅ | Sensitive fields are AES-256-GCM ciphertext |
 | Archive records younger than the legal minimum | ✅ | Refused (400); verify flags `RETENTION_POLICY_VIOLATION` |
 | Anonymous or wrong-role access, forged submitter | ✅ | Spring Security roles; `recordedBy` from the login |
+| A reader opening another client's records (IDOR / BOLA) | ✅ | Resource scopes enforced in the SQL query |
 | Corrupt or unparseable row | ✅ | `CORRUPT_RECORD` at that seq; reads keep working |
 | **Attacker who steals the keys as well as the DB** | ⚠️ | Keep keys in a KMS/HSM, outside the DB host, and the checkpoint file on WORM storage |
 

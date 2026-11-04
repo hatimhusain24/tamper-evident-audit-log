@@ -39,6 +39,8 @@ each row (intent, constraints, acceptance criteria) as its own task definition. 
 | P7 | Switch to Java Spring Boot and test all scenarios, including edge cases | Ported to Java 17 + Spring Boot with 85 tests; Python version removed |
 | P8 | Fix everything in the lead's evaluation scorecard step by step, with unit tests and coverage; commit as each part is done, not all at once | Remediation in §6: 8 tasks, 180 tests, coverage gate |
 | P9 | List what is still missing from the scorecard, then complete every small and medium item precisely | Second round in §6: versioning, proxy-aware rate limit, signed bundles and checkpoints, key rotation, encryption at rest, dependency scan, TLS profile; 207 tests |
+| P10 | Merge the pending dependency PRs | All 7 Dependabot PRs tested and merged, incl. Spring Boot 4.1 (see below) |
+| P11 | Do per-resource access (IDOR/BOLA) and JSON logs | Resource scopes and ECS logs with user + request id; 218 tests |
 
 ## 2. Decision log: generated / modified / rejected
 
@@ -117,6 +119,7 @@ Evaluation rework (to be reviewed and ticked by the engineer):
 - [ ] Request limits and idempotency (`RequestGuardFilter`, `appendOnce`), commit `343ee50`
 - [ ] Signed bundles and checkpoints (`SigningKey`, `CheckpointService`), commits `914eb0d`, `9812903`
 - [ ] HMAC key rotation and encryption at rest (`IntegrityKey`, `FieldCipher`), commits `38c7da9`, `ef638a9`
+- [ ] Per-resource authorization (`ResourceScopes`, scoped query), commit `0457009`
 
 ## 5. Engineer review log (engineer appends entries during review / rework)
 
@@ -203,4 +206,17 @@ All seven were tested on an integration branch and merged only with the full gat
 | #2 | sqlite-jdbc 3.54.1.0 | None |
 | #3, #7 | FindSecBugs 1.14.0, SpotBugs plugin 4.10.5.0 | New `XSS_SERVLET` finding: the filter's error body is now serialized with Jackson instead of hand-built JSON |
 | #6, #5 | **Spring Boot 4.1.2**, springdoc 3.2.0 | `HttpStatus.PAYLOAD_TOO_LARGE` renamed `CONTENT_TOO_LARGE`; test starter `spring-boot-starter-webmvc-test` and the new `AutoConfigureMockMvc` package; null-safe role check (Spring Security 7 marks `getAuthority()` nullable). The jar was started and probed live |
+
+### Third round (P11): object-level authorization and structured logs
+
+| Gap (scorecard ID) | Fix | Regression test | Commit |
+|---|---|---|---|
+| Any reader could read any client's records: IDOR / BOLA (SEC-03, TEST-04) | Per-user resource scopes; READERs must declare them; SQL-level filtering; scoped writes; bulk operations need an unscoped user | `ResourceScopeTest` (8) | `0457009` |
+| Logs not machine-readable or correlated (CQ-04, SEC-08) | ECS JSON logs; user and request id on every line; `X-Request-Id` | `StructuredLoggingTest` (3) | `1d1c7d3` |
+
+| # | Decision | Alternatives rejected | Why |
+|---|---|---|---|
+| 38 | Filter scopes inside the SQL query | Filter results after the query | Post-filtering breaks page sizes and still reads other clients' rows |
+| 39 | Out-of-scope query returns an empty list, out-of-scope write returns 403 | 403 for reads too | An empty result doesn't reveal whether another client's account exists |
+| 40 | READER must have scopes; other roles default to unrestricted | Scopes optional for everyone | Readers are the broad, many-user role; compliance and admin need the whole log by design |
 

@@ -16,7 +16,7 @@
    a service that won't start without credentials and keys. This was added after the evaluation showed the
    original "trusted callers" assumption was not acceptable for client-data audit.
 5. **Keep it small and tested.** Spring Boot plus SQLite JDBC, about 2,200 lines of application
-   code, 207 tests, no ORM, no mocks, coverage gated at 90% line / 85% branch.
+   code, 218 tests, no ORM, no mocks, coverage gated at 90% line / 85% branch.
 
 ## Artifacts
 
@@ -36,6 +36,7 @@
 | Risk | Mitigation | Validated by |
 |---|---|---|
 | Anonymous or wrong-role access to client data | Spring Security, deny by default, roles, masking, export COMPLIANCE only | `SecurityTest` role matrix |
+| A reader opening another client's records | Per-user resource scopes, enforced in SQL | `ResourceScopeTest` |
 | Forged attribution | `recordedBy` from the login, inside the hash; reserved system event types | spoofing tests |
 | Evidence destruction through retention | 6-year floor in the store; verify flags violations | `RetentionTest`, `AuditStoreTest` |
 | DB admin rewrites the chain | Per-record HMAC with a server key | `fullRewriteFoolsAPlainHashChainButNotTheMac` |

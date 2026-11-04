@@ -15,7 +15,7 @@ AES-256-GCM from the JDK.
 Prerequisites: **JDK 17+** and **Maven 3.9+**.
 
 ```bash
-mvn verify                                                   # build, 207 tests, coverage gate, SpotBugs
+mvn verify                                                   # build, 218 tests, coverage gate, SpotBugs
 java -jar target/audit-log.jar --spring.profiles.active=dev  # http://localhost:8080
 ```
 
@@ -25,7 +25,7 @@ The `dev` profile adds four demo users, demo keys and Swagger UI. Without it the
 | User | Password | Role | Can |
 |---|---|---|---|
 | `writer` | `writer-pass` | WRITER | append events |
-| `reader` | `reader-pass` | READER | query and verify (sensitive fields masked) |
+| `reader` | `reader-pass` | READER | query and verify, **only accounts `acc-1*`** (sensitive fields masked) |
 | `compliance` | `compliance-pass` | COMPLIANCE | query unmasked, export, access reports |
 | `admin` | `admin-pass` | ADMIN | redaction, retention, query, verify, metrics |
 
@@ -69,6 +69,11 @@ Errors use RFC 7807 problem details: 400 validation · 401 no or bad credentials
 The submitter of every record is the **authenticated user** (`recordedBy`, sealed into the hash).
 `actorId` is who the event is about, as asserted by that submitter.
 
+**Object-level access (resource scopes):** a user can be limited to resources, e.g.
+`audit.security.users[n].resource-scopes=CLIENT_ACCOUNT:acc-1*`. READER users must have scopes;
+queries return only in-scope records, scoped writers can only write their own resources, and bulk
+operations (export, reports, redaction, retention, checkpoints) need an unscoped user.
+
 Verify an exported bundle **offline** (no server or database needed):
 
 ```bash
@@ -90,12 +95,15 @@ With `--public-key`, a record added, removed or edited after export fails as `SI
 | `AUDIT_ENCRYPTION_KEY` | _none: required_ | AES-256 key (base64, 32 bytes) for sensitive fields at rest |
 | `AUDIT_CHECKPOINT_FILE` / `AUDIT_CHECKPOINT_INTERVAL_MS` | `audit-checkpoints.jsonl` / 1 h | Signed checkpoints; put the file on WORM storage |
 | `AUDIT_TRUSTED_PROXIES` | _empty_ | Load balancer IPs whose `X-Forwarded-For` is trusted for rate limiting |
-| `audit.security.users[n].*` | _none: required_ | `name`, `password-hash` (`{bcrypt}…` only), `roles` |
+| `audit.security.users[n].*` | _none: required_ | `name`, `password-hash` (`{bcrypt}…` only), `roles`, `resource-scopes` (required for READER) |
 | `AUDIT_RETENTION_MIN_DAYS` | `2190` (6 years) | Legal minimum; nothing younger can ever be archived |
 | `AUDIT_RETENTION_DAYS` | `2190` | Default retention window (must be ≥ the minimum) |
 | `AUDIT_SENSITIVE_FIELDS` | `ssn,accountNumber,taxId,dateOfBirth` | Encrypted at rest and masked for READER |
 | `AUDIT_MAX_REQUEST_BYTES` | `65536` | Larger bodies get 413 |
 | `AUDIT_RATE_LIMIT_PER_MINUTE` | `600` | Per client IP, before authentication |
+
+Logs: JSON (Elastic Common Schema) by default, with `user.name` and `request.id` on every line;
+each response carries `X-Request-Id`. The dev profile prints readable text.
 
 TLS: terminate at the load balancer (set `AUDIT_TRUSTED_PROXIES`), or run with the `tls` profile and
 `AUDIT_TLS_KEYSTORE` / `AUDIT_TLS_KEYSTORE_PASSWORD` (PKCS12, TLS 1.3/1.2). Spring Security adds HSTS on
@@ -104,9 +112,9 @@ HTTPS. Swagger UI is off unless the `dev` profile is active.
 ## Quality gates (`mvn verify`, also run by CI on every push)
 
 * Compiler with `-Xlint:all -Werror`: any warning fails the build
-* 207 JUnit 5 tests: unit, API integration, security matrix, direct-database tampering,
-  fault injection, encryption, checkpoints, concurrency, privacy
-* JaCoCo coverage gate: line ≥ 90%, branch ≥ 85% (currently 96.0% / 91.1%); CI publishes the report
+* 218 JUnit 5 tests: unit, API integration, role matrix, object-level authorization,
+  direct-database tampering, fault injection, encryption, checkpoints, logging, concurrency, privacy
+* JaCoCo coverage gate: line ≥ 90%, branch ≥ 85% (currently 96.3% / 91.0%); CI publishes the report
 * SpotBugs + FindSecBugs: each suppression is explained in `spotbugs-exclude.xml`
 * Dependency scanning: Dependabot weekly, plus OWASP dependency-check weekly in CI (fails on CVSS ≥ 7;
   needs an `NVD_API_KEY` secret). Locally: `mvn -P security-scan verify -DnvdApiKey=...`
@@ -118,7 +126,8 @@ HTTPS. Swagger UI is off unless the `dev` profile is active.
 src/main/java/com/audit/
   chain/       HashChain, ChainVerifier, IntegrityKey (MAC keys), SigningKey (Ed25519), records, offline CLI
   store/       AuditStore (the only class that touches the database), FieldCipher, CheckpointService
-  security/    SecurityConfig (roles, fail-closed users), RequestGuardFilter (size + rate), LogSafe
+  security/    SecurityConfig (roles, fail-closed users), ResourceScopes, RequestGuardFilter (size + rate),
+               LogContextFilter (user + request id in logs), LogSafe
   api/         AuditController, request/response DTOs, error mapping
   compliance/  AccessReportService + typed AccessReport (Scenario C)
 src/test/java/com/audit/   unit, integration, security, fault-injection and benchmark tests
