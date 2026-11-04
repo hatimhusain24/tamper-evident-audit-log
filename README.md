@@ -5,43 +5,36 @@ inserting history in the data store is **detected** by `GET /audit/verify`. Reda
 retention archival, verifiable export and a regulator access report all work **without breaking
 the chain**.
 
-**Stack:** Python 3.11+, FastAPI, SQLite (stdlib), SHA-256 (stdlib). Three runtime dependencies.
+**Stack:** Java 17, Spring Boot 3.5, SQLite (JDBC), SHA-256 (JDK). Swagger UI included.
 
 ## Quick start
 
-```powershell
-# Windows (PowerShell)
-python -m venv .venv; .venv\Scripts\Activate.ps1
-pip install -r requirements-dev.txt
-uvicorn app.main:create_app --factory --reload
-```
+Prerequisites: **JDK 17+** and **Maven 3.9+**.
 
 ```bash
-# macOS / Linux
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements-dev.txt
-uvicorn app.main:create_app --factory --reload
+mvn verify                       # compile, 85 tests, SpotBugs security checks
+java -jar target/audit-log.jar   # starts on http://localhost:8080
 ```
 
-Open **http://127.0.0.1:8000/docs** for interactive Swagger UI (the OpenAPI schema is generated
-from `app/models.py`).
+Open **http://localhost:8080/docs** for Swagger UI. All endpoints can be tried from the browser.
 
 ## Validate end-to-end (the flow from the brief)
 
-With the server running, in a second terminal:
+1. **Write** three events with `POST /audit/events` (example body is prefilled in Swagger), e.g.
+   ```json
+   {"eventType":"ACCOUNT_VIEWED","actorId":"emp-1","resourceType":"CLIENT_ACCOUNT",
+    "resourceId":"acc-1001","payload":{"purpose":"client call","accountNumber":"9876543210"}}
+   ```
+2. **Query** with `GET /audit/events?resourceId=acc-1001`.
+3. **Verify** with `GET /audit/verify` → `"valid": true`.
+4. **Tamper** directly in the database file `audit.db`, bypassing the API. Use
+   [DB Browser for SQLite](https://sqlitebrowser.org) or the `sqlite3` CLI:
+   ```sql
+   UPDATE events SET actor_id = 'mallory' WHERE seq = 2;
+   ```
+5. **Verify again** → `"valid": false, "firstInvalidSeq": 2, "violation": "HASH_MISMATCH"`.
 
-```bash
-python scripts/demo.py
-```
-
-The script writes events, queries them, verifies the chain, **edits a row directly in SQLite**,
-verifies again (`HASH_MISMATCH` at that seq), then exercises redaction, export and the compliance
-report. To tamper by hand:
-
-```bash
-python -c "import sqlite3; c=sqlite3.connect('audit.db'); c.execute(\"UPDATE events SET actor_id='mallory' WHERE seq=1\"); c.commit()"
-curl http://127.0.0.1:8000/audit/verify
-```
+The same flow runs automatically in `ScenarioAApiTest`.
 
 ## API
 
@@ -56,12 +49,13 @@ curl http://127.0.0.1:8000/audit/verify
 | `GET` | `/audit/reports/account-access` 🔒 | Scenario C regulator access report |
 
 There is **no update or delete endpoint**. 🔒 = requires the `X-Admin-Key` header when `AUDIT_ADMIN_KEY` is set.
+Errors use RFC 7807 problem details: 400 validation, 401 admin key, 404 unknown seq, 409 invalid state.
 
-Verify an exported bundle **offline** (stdlib only, no server needed):
+Verify an exported bundle **offline** (no server or database needed):
 
 ```bash
-curl -s "http://127.0.0.1:8000/audit/export?resourceId=acc-1" -o bundle.json
-python -m app.verify_bundle bundle.json --expected-head <headHash from a trusted checkpoint>
+curl -s "http://localhost:8080/audit/export?resourceId=acc-1001" -o bundle.json
+java -jar target/audit-log.jar verify-bundle bundle.json [trusted-head-hash]
 ```
 
 ## Configuration
@@ -72,26 +66,21 @@ python -m app.verify_bundle bundle.json --expected-head <headHash from a trusted
 | `AUDIT_RETENTION_DAYS` | `365` | Retention window used by `/audit/retention/run` |
 | `AUDIT_ADMIN_KEY` | _unset_ | If set, required for 🔒 endpoints |
 
-## Quality gates
+## Quality gates (`mvn verify`, also run by CI on every push)
 
-```bash
-ruff check .     # lint + bandit security rules
-pytest -q        # 60 unit + integration tests
-```
-
-CI runs both on every push (`.github/workflows/ci.yml`).
+* Compiler with `-Xlint:all -Werror`: any warning fails the build
+* 85 JUnit 5 tests: unit, API integration, direct-database tampering, concurrency, privacy
+* SpotBugs + FindSecBugs: each suppression is explained in `spotbugs-exclude.xml`
 
 ## Project layout
 
 ```
-app/chain.py          hash chain core: pure functions, no I/O (hashing, verify, bundle verify)
-app/store.py          SQLite persistence: the only module that touches the DB
-app/models.py         API schemas and validation
-app/main.py           HTTP routes
-app/compliance.py     Scenario C report
-app/verify_bundle.py  offline bundle verifier CLI
-scripts/demo.py       end-to-end demo
-tests/                unit (chain) + integration (API, tamper, redaction, retention, export, compliance)
+src/main/java/com/audit/
+  chain/       HashChain (hashing, verify, bundle verify), ChainVerifier, records: pure, no I/O
+  store/       AuditStore: the only class that touches the database
+  api/         AuditController, request/response DTOs, error mapping
+  compliance/  AccessReportService (Scenario C)
+src/test/java/com/audit/   unit + integration tests per scenario
 ```
 
 ## Documentation

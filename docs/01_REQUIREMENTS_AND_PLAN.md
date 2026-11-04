@@ -22,7 +22,7 @@ operations: **retention archival** and **field-level redaction**. It must also s
 | A6 | `GET /audit/verify` | Streams the full chain in O(n) time and O(1) memory (plus redaction bookkeeping). Reports `valid`, first bad `seq`, and a typed `violation`. |
 | B1 | Retention: archive/soft-delete old records without false positives | Archival turns old records into **tombstones**: content is purged but `seq/prevHash/hash` stay, so the chain links still verify. A chained `RECORDS_ARCHIVED` event authorizes the range. |
 | B2 | Redaction without breaking the chain | **Per-field salted commitments**: the record hash covers `H(salt‖field)`, not the raw value. Redaction deletes the value and salt and keeps the commitment. A chained `RECORD_REDACTED` event authorizes it. |
-| B3 | Verifiable export bundle | `GET /audit/export` returns the records plus the chain segment that links them. An **offline verifier** (`python -m app.verify_bundle`) needs no access to the service. |
+| B3 | Verifiable export bundle | `GET /audit/export` returns the records plus the chain segment that links them. An **offline verifier** (`java -jar audit-log.jar verify-bundle`) needs no access to the service. |
 | C | "Regulators need to audit access to client account data" | Ambiguous. Clarified in [04_SCENARIO_C_COMPLIANCE.md](04_SCENARIO_C_COMPLIANCE.md) before any code was written. |
 
 ## 3. Ambiguities identified & assumptions
@@ -45,7 +45,7 @@ operations: **retention archival** and **field-level redaction**. It must also s
 | ID | Task | Depends on | Acceptance criteria |
 |----|------|-----------|---------------------|
 | T1 | Requirements, assumptions, plan (this doc) | — | Reviewed by engineer before coding |
-| T2 | Scaffold: deps, lint/security config, CI | T1 | `ruff check` + `pytest` run green on an empty suite |
+| T2 | Scaffold: deps, lint/security config, CI | T1 | `mvn verify` (compile, tests, SpotBugs) runs green |
 | T3 | Hash-chain core (pure functions) | T2 | Unit tests: deterministic canonical hashing; every tamper type detected |
 | T4 | SQLite store + Write/Query/Verify API (Scenario A) | T3 | API tests; direct DB edit → `verify` reports the first bad seq and its violation type |
 | T5 | Redaction (Scenario B) | T4 | Redacted record still verifies; forged "redaction" is flagged |

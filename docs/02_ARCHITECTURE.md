@@ -3,25 +3,25 @@
 ## 1. Components
 
 ```
-            ┌──────────────────────── app/main.py (FastAPI routes) ───────────────────────┐
+            ┌────────────── api/AuditController (Spring MVC, @RestController) ─────────────┐
  HTTP ───▶  │ POST /audit/events   GET /audit/events   GET /audit/verify   GET /audit/export │
             │ POST …/redactions 🔒  POST /audit/retention/run 🔒  GET …/account-access 🔒     │
             └──────┬──────────────────────────┬──────────────────────────┬──────────────────┘
                    │ validated by             │ persists via             │ Scenario C
-            app/models.py              app/store.py (SQLite)      app/compliance.py
-            (pydantic schemas)          single write path,          (reuses store.query
-                                        snapshot reads              + verify_chain)
+            api/EventRequest, Dtos     store/AuditStore (SQLite)  compliance/AccessReportService
+            (Bean Validation)           JdbcTemplate, single        (reuses store.query
+                                        write path, streaming reads  + store.verify)
                                               │
                                               ▼ builds / checks records with
-                                   app/chain.py — PURE functions, no I/O
-                                   canonical JSON · SHA-256 · verify_chain · verify_bundle
+                                   chain/HashChain + ChainVerifier — PURE, no I/O
+                                   canonical JSON · SHA-256 · verify · verifyBundle
                                               ▲
-                                   app/verify_bundle.py (offline CLI, stdlib only)
+                                   chain/BundleVerifierCli (java -jar audit-log.jar verify-bundle)
 ```
 
-**Design rule:** all cryptographic logic sits in one I/O-free module (`chain.py`). The service, the
+**Design rule:** all cryptographic logic sits in one I/O-free package (`chain`). The service, the
 tests and an external recipient's offline verifier run *the same code*. That keeps the security
-core small (~150 lines), easy to review and easy to unit-test.
+core small (~280 lines), easy to review and easy to unit-test.
 
 ## 2. Data model (single table `events`)
 
@@ -61,8 +61,8 @@ hash_0 (genesis prevHash) = "000…0" (64 hex)
 
 | Option | Verdict |
 |---|---|
-| **SHA-256** ✅ | FIPS 180-4 approved (matters in a regulated broker-dealer), in every stdlib and HSM, 128-bit collision resistance, ~0.03 ms per record here |
-| SHA-3 / BLAKE2/3 | Equally secure; BLAKE3 is faster, but neither is a plain stdlib/FIPS default everywhere. No benefit at this scale |
+| **SHA-256** ✅ | FIPS 180-4 approved (matters in a regulated broker-dealer), built into the JDK and every HSM, 128-bit collision resistance, ~0.03 ms per record here |
+| SHA-3 / BLAKE2/3 | Equally secure; BLAKE3 is faster, but neither is a plain JDK/FIPS default everywhere. No benefit at this scale |
 | MD5 / SHA-1 | Broken collision resistance. Rejected |
 | HMAC-SHA-256 (keyed) | Stops a DB admin from **recomputing** the chain, but key management (KMS/HSM, rotation) is out of scope. Listed as the first production hardening step (§6) |
 
@@ -117,14 +117,14 @@ changed since export.
 ## 5. API design notes
 
 * **Server-assigned timestamps** prevent backdating and keep `seq` order equal to time order, which
-  retention depends on. Unknown fields such as `timestamp` are rejected (`extra="forbid"`).
-* **Keyset pagination** (`cursor` = last `seq`): constant cost per page (1 ms at depth 9,000), and
+  retention depends on. Unknown fields such as `timestamp` are rejected (`fail-on-unknown-properties`).
+* **Keyset pagination** (`cursor` = last `seq`): constant cost per page (~3 ms at depth 9,000), and
   stable while new events are appended. OFFSET pagination would skip or duplicate rows under
   concurrent writes.
 * Time range is `[from, to)`, so adjacent windows never double-count.
 * Reserved system event types (`RECORD_REDACTED`, `RECORDS_ARCHIVED`) are rejected on the public
   write path, so callers can't forge an authorization.
-* Errors: 422 validation, 404 unknown seq, 409 invalid state (e.g. already redacted), 401 bad admin key.
+* Errors (RFC 7807 problem details): 400 validation, 404 unknown seq, 409 invalid state (e.g. already redacted), 401 bad admin key.
 
 ## 6. Threat model
 
@@ -134,7 +134,7 @@ changed since export.
 | Edit and rehash one record | ✅ | Next record's `prevHash` → `CHAIN_LINK_BROKEN` |
 | Delete / insert / reorder records | ✅ | `SEQUENCE_GAP` / `CHAIN_LINK_BROKEN` |
 | Fake redaction or archival in the DB | ✅ | `UNAUTHORIZED_REDACTION` / `UNAUTHORIZED_ARCHIVE` |
-| Forge system events via the API | ✅ | Rejected (422) |
+| Forge system events via the API | ✅ | Rejected (400) |
 | **Truncate the newest records** | ⚠️ only with an anchor | Compare `headSeq/headHash` with an external checkpoint |
 | **Full chain rewrite by someone with DB access** (the algorithm is public) | ⚠️ only with an anchor or key | Production: HMAC/signing key in KMS, plus periodic head anchoring to WORM storage or a separate system |
 
@@ -144,6 +144,6 @@ transaction, so the redaction and its audit event commit atomically), oversized 
 
 ## 7. Production evolution
 
-Postgres (only `store.py` changes), HMAC/Ed25519 signing via KMS, signed periodic checkpoints
+Postgres (only `AuditStore` changes), HMAC/Ed25519 signing via KMS, signed periodic checkpoints
 (incremental verify from the last checkpoint instead of O(n)), Merkle proofs for exports, authN
 (OIDC/mTLS) with RBAC, structured logging and metrics.

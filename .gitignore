@@ -1,10 +1,7 @@
-__pycache__/
-*.pyc
-.venv/
-venv/
+target/
 *.db
 *.db-*
-.pytest_cache/
-.ruff_cache/
-export*.json
-target/
+bundle*.json
+.idea/
+*.iml
+.vscode/

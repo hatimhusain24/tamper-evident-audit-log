@@ -5,9 +5,9 @@
 | | |
 |---|---|
 | **AI tool** | Claude Code (Anthropic), agentic coding assistant |
-| **Mode of use** | The engineer gave the brief and constraints. The AI drafted the plan, code, tests and docs task by task. Each step went through automated quality gates (ruff + pytest) before commit. Engineer review and sign-off are tracked in §4 and §5 |
+| **Mode of use** | The engineer gave the brief and constraints. The AI drafted the plan, code, tests and docs task by task. Each step went through automated quality gates before commit (first ruff + pytest, after the Java port `mvn verify`: compile with warnings as errors, tests, SpotBugs). Engineer review and sign-off are tracked in §4 and §5 |
 | **Traceability** | Each commit = one task from [01_REQUIREMENTS_AND_PLAN.md](01_REQUIREMENTS_AND_PLAN.md) §4. AI use is disclosed here rather than in commit messages. This file records what was accepted, modified or rejected, and why |
-| **Secure AI usage** | Only the assignment brief and generic requirements were shared with the AI. No credentials, production code, client data or internal hostnames. No secrets in the repo (admin key comes from an env var). AI-generated code passes the bandit (`S`) security rules. Raw SQL uses only fixed column names; values are always bound parameters |
+| **Secure AI usage** | Only the assignment brief and generic requirements were shared with the AI. No credentials, production code, client data or internal hostnames. No secrets in the repo (admin key comes from an env var). AI-generated code passes security static analysis (SpotBugs + FindSecBugs). Raw SQL uses only fixed column names; values are always bound parameters |
 
 ## 1. Prompts
 
@@ -34,13 +34,17 @@ each row (intent, constraints, acceptance criteria) as its own task definition. 
 | P2 | Keep commit messages short and simple | Messages rewritten; AI use is disclosed in this log instead |
 | P3 | Sign-off boxes can't be clicked | Changed to a `- [ ]` checklist (§4) |
 | P4 | Check the work against the brief and run the app in a browser | Ran the full tamper flow in Swagger UI; listed the steps that are still open |
-| P5 | Make this log accurate | This revision |
+| P5 | Make this log accurate | Prompts and decision log reworded |
+| P6 | Should this have been Java Spring Boot? | The brief names no stack; the AI first recommended keeping Python because of the deadline |
+| P7 | Switch to Java Spring Boot and test all scenarios, including edge cases | Ported to Java 17 + Spring Boot with 85 tests; Python version removed |
 
 ## 2. Decision log: generated / modified / rejected
 
 Most of these decisions were made **by the AI while generating the code**: options it considered
 and rejected, and problems its own tests or lint caught. They are recorded so the engineer can
 review and challenge them (§4). They are not a record of the engineer's own review.
+Decisions 1–18 come from the first (Python) version and carried over unchanged to Java; 19+ come
+from the port.
 
 | # | Area | Option considered | Outcome | Rationale |
 |---|------|-------------|---------|-----------|
@@ -62,6 +66,13 @@ review and challenge them (§4). They are not a record of the engineer's own rev
 | 16 | Tests | Retention test expected `firstInvalidSeq == 3` | **Modified (test, not code)** | The verifier's answer (4) was correct: seq 3 was the legitimate archive event |
 | 17 | Tests | Placeholder assertion `... or True` in the first draft of the privacy test | **Rejected** | It asserted nothing. Rewritten to scan the raw DB/WAL bytes |
 | 18 | Scenario C | Start with the endpoint | **Rejected** | The requirement was clarified and committed first (`15c4754`), then implemented |
+| 19 | Stack | Python + FastAPI (first version) | **Changed** to Java 17 + Spring Boot | The brief leaves the stack open; Java is the team's stack and the engineer's strongest language, which matters for the live change. Same design and tests |
+| 20 | Persistence | JPA / Hibernate | **Rejected** | The chain needs exact control of SQL, triggers and pragmas; `JdbcTemplate` is smaller and clearer |
+| 21 | Spring wiring | `@Repository` on a `final` store class | **Modified** | Spring's exception-translation proxy can't subclass a final class; `@Component` needs no proxy |
+| 22 | Static analysis | SpotBugs reported 27 findings | **Triaged** | 24 record/DTO exposure warnings, 1 timing warning on public hashes, 2 SQL warnings on whitelisted SQL: all suppressed with reasons in `spotbugs-exclude.xml`. The admin key already used a constant-time compare |
+| 23 | Tests | Third archive run expected to archive 0 records | **Modified (test)** | The previous archive event is also old enough, so 1 is correct and verify stays valid |
+| 24 | Performance | First measurement: 458 appends/s | **Rejected** | The harness opened a new DB connection per write; with the app's Hikari pool it is ~2,700/s |
+| 25 | API docs | Swagger showed placeholder `"string"` bodies | **Modified** | Added `@Schema` examples so the write call can be tried as is |
 
 ## 3. Where AI was used
 
@@ -80,12 +91,14 @@ High-impact changes are those that affect integrity guarantees, privacy or the A
 
 Tick a box by editing this file on GitHub (pencil icon) or locally: change `[ ]` to `[x]`, then commit.
 
-- [x] Hash/chain format (`app/chain.py`), commit `c528719`
-- [x] Write path, timestamps, concurrency (`app/store.py`), commit `1f05c80`
-- [x] Redaction scheme and physical erasure, commit `93eb621`
-- [x] Retention tombstones and authorization, commit `f4ef1a1`
-- [x] Export bundle format and offline verifier, commit `3632929`
-- [x] Scenario C assumptions and scope, commits `15c4754`, `463eaac`
+Re-review needed: the earlier ticks applied to the Python version, which has been replaced.
+
+- [ ] Hash/chain format (`chain/HashChain`, `ChainVerifier`), commit `9a6bd6e`
+- [ ] Write path, timestamps, concurrency (`store/AuditStore`), commit `6a0dc2a`
+- [ ] Redaction scheme and physical erasure, commits `6a0dc2a`, `2a34015`
+- [ ] Retention tombstones and authorization, commits `6a0dc2a`, `2a34015`
+- [ ] Export bundle format and offline verifier, commits `6a0dc2a`, `2a34015`
+- [ ] Scenario C assumptions and scope, commits `15c4754`, `09d65b9`
 
 ## 5. Engineer review log (engineer appends entries during review / rework)
 
