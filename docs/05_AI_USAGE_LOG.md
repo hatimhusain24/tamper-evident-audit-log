@@ -104,4 +104,9 @@ Re-review needed: the earlier ticks applied to the Python version, which has bee
 
 | Date | What I reviewed or changed | AI involved? | Notes |
 |------|----------------------------|--------------|-------|
-| | | | |
+| 2026-11-04 | Hash chain (Java): prevHash is inside each record's hash, so editing one record breaks all later ones | Yes (asked Claude to explain) | Approved |
+| 2026-11-04 | Write path: server sets timestamp, never goes backwards; lock + BEGIN IMMEDIATE so the chain can't fork | Yes (asked Claude to explain) | Approved |
+| 2026-11-04 | Redaction: value and salt removed, hash kept; logged as its own event; RedactionTest passes | No | Approved |
+| 2026-11-04 | Retention: archived records keep their hashes, no false alarms; RetentionTest passes | No | Approved |
+| 2026-11-04 | Export: bundle verifies offline with verify-bundle; tampered bundle fails; ExportTest passes | No | Approved |
+| 2026-11-04 | Scenario C: agree with assumptions (reads count as access, no regulator login, payload hidden); tests pass | No | Approved |
