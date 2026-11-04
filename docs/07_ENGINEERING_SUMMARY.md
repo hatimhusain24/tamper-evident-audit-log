@@ -12,11 +12,11 @@
    each must be *authorized by an event inside the chain*, and `verify` checks for that
    authorization and for the legal retention floor.
 4. **The audit log controls access to itself.** Deny-by-default Spring Security, least-privilege
-   roles, the submitter sealed into every record, PII masked for readers, and a service that won't
-   start without credentials and an integrity key. This was added after the evaluation showed the
+   roles, the submitter sealed into every record, PII masked for readers and encrypted at rest, and
+   a service that won't start without credentials and keys. This was added after the evaluation showed the
    original "trusted callers" assumption was not acceptable for client-data audit.
-5. **Keep it small and tested.** Spring Boot plus SQLite JDBC, about 1,700 lines of application
-   code, 180 tests, no ORM, no mocks, coverage gated at 90% line / 85% branch.
+5. **Keep it small and tested.** Spring Boot plus SQLite JDBC, about 2,200 lines of application
+   code, 207 tests, no ORM, no mocks, coverage gated at 90% line / 85% branch.
 
 ## Artifacts
 
@@ -39,11 +39,13 @@
 | Forged attribution | `recordedBy` from the login, inside the hash; reserved system event types | spoofing tests |
 | Evidence destruction through retention | 6-year floor in the store; verify flags violations | `RetentionTest`, `AuditStoreTest` |
 | DB admin rewrites the chain | Per-record HMAC with a server key | `fullRewriteFoolsAPlainHashChainButNotTheMac` |
-| Truncation of the newest records | External anchor (`anchorSeq/anchorHash`) | `tailTruncationIsCaughtByAnExternalAnchor` |
+| Truncation of the newest records | Signed checkpoints used automatically by verify | `CheckpointTest` |
+| Records dropped from an export | Ed25519-signed bundles | `droppedRecordIsInvisibleToHashesButBreaksTheSignature` |
+| PII read from the database file | AES-256-GCM encryption of sensitive fields | `EncryptionAtRestTest` |
 | Corrupt rows break verification | `CORRUPT_RECORD` at the seq, reads keep working | `CorruptRecordTest` |
 | Partial writes on failure | One transaction per operation | `FaultInjectionTest` |
 | PII lingering on disk after redaction | `secure_delete` + WAL checkpoint | raw-bytes test |
-| Floods, password guessing, huge bodies | Per-IP rate limit and body limit before auth | `RequestGuardTest` |
+| Floods, password guessing, huge bodies | Per-client rate limit (proxy-aware) and body limit before auth | `RequestGuardTest`, `RequestGuardFilterTest` |
 | O(n) verify at scale | 10.5k records in ~0.5 s now; signed checkpoints later | `PerfBenchmarkTest` |
 
 ## Assumptions
@@ -55,17 +57,16 @@ production · Scenario C assumptions in [04](04_SCENARIO_C_COMPLIANCE.md) §1.
 
 ## Limitations
 
-* An attacker holding both DB access **and** the HMAC key could rewrite the chain; keep the key in
-  a KMS/HSM and anchor heads externally. Key rotation is not implemented.
-* Anchoring is manual (store `headHash` yourself); there is no automatic WORM checkpoint job.
-* Single SQLite file and an in-memory rate limiter: one service instance.
-* PII is masked in responses but stored in plaintext at rest (no field encryption yet).
-* Export bundles can't prove completeness (records could be omitted from a bundle).
+* An attacker holding DB access **and** the keys could rewrite the chain and checkpoints; keep keys
+  in a KMS/HSM and the checkpoint file on separate WORM storage.
+* Authentication is HTTP Basic with configured users: no OIDC, password expiry or rotation.
+* The AES field-encryption key can't be rotated yet (the HMAC key can).
+* Single SQLite file and an in-memory rate limiter: one service instance; verify is O(n).
 * Nested-field redaction is not supported (redact the parent key).
 
 ## Next steps (in order)
 
-1. OIDC tokens instead of Basic, and KMS-held HMAC keys with rotation.
-2. Automatic signed checkpoints to WORM storage, and incremental verify from the last one.
+1. OIDC tokens instead of Basic, and all keys held in a KMS/HSM.
+2. Incremental verify from the last signed checkpoint instead of walking the whole chain.
 3. Postgres store and a shared rate limiter for horizontal scaling.
-4. Field-level encryption for PII, and Merkle proofs plus per-filter commitments for exports.
+4. Rotation for the field-encryption key.

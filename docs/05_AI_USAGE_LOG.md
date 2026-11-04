@@ -38,6 +38,7 @@ each row (intent, constraints, acceptance criteria) as its own task definition. 
 | P6 | Should this have been Java Spring Boot? | The brief names no stack; the AI first recommended keeping Python because of the deadline |
 | P7 | Switch to Java Spring Boot and test all scenarios, including edge cases | Ported to Java 17 + Spring Boot with 85 tests; Python version removed |
 | P8 | Fix everything in the lead's evaluation scorecard step by step, with unit tests and coverage; commit as each part is done, not all at once | Remediation in §6: 8 tasks, 180 tests, coverage gate |
+| P9 | List what is still missing from the scorecard, then complete every small and medium item precisely | Second round in §6: versioning, proxy-aware rate limit, signed bundles and checkpoints, key rotation, encryption at rest, dependency scan, TLS profile; 207 tests |
 
 ## 2. Decision log: generated / modified / rejected
 
@@ -114,6 +115,8 @@ Evaluation rework (to be reviewed and ticked by the engineer):
 - [ ] Retention floor (`AuditStore.archive`, `ChainVerifier`), commit `613371e`
 - [ ] Corrupt-record handling and error mapping, commits `0e63b9c`, `66d2f94`
 - [ ] Request limits and idempotency (`RequestGuardFilter`, `appendOnce`), commit `343ee50`
+- [ ] Signed bundles and checkpoints (`SigningKey`, `CheckpointService`), commits `914eb0d`, `9812903`
+- [ ] HMAC key rotation and encryption at rest (`IntegrityKey`, `FieldCipher`), commits `38c7da9`, `ef638a9`
 
 ## 5. Engineer review log (engineer appends entries during review / rework)
 
@@ -163,3 +166,28 @@ Decisions made during the rework:
 | 29 | Export COMPLIANCE only | COMPLIANCE + ADMIN | Least privilege; the role-matrix test exposed that the first config allowed ADMIN |
 | 30 | Take the SQLite lock with a no-op write | Driver's `transaction_mode=IMMEDIATE` | A failed lazy BEGIN poisoned pooled connections (found by the lock-timeout test) |
 | 31 | 6-year default retention floor | Configurable with no floor | SEC 17a-4 broker-dealer records; anything shorter must be an explicit config change |
+
+### Second round (P9): remaining small and medium items
+
+| Remaining gap (scorecard ID) | Fix | Regression test | Commit |
+|---|---|---|---|
+| No API versioning (ARC-02) | All endpoints under `/v1`; old paths denied | `unversionedPathsNoLongerExist` | `0fdfd66` |
+| Rate limit shared by every client behind a load balancer (SEC-06) | `X-Forwarded-For` trusted only from `audit.trusted-proxies`; rightmost untrusted hop is the client | `RequestGuardFilterTest` (3 new) | `a57a502` |
+| Export can't prove nothing was dropped (ARC-07) | Ed25519-signed bundles; public key at `/v1/audit/signing-key`; CLI `--public-key` | `droppedRecordIsInvisibleToHashesButBreaksTheSignature` and 3 more | `914eb0d` |
+| Anchoring was manual (ARC-08) | Scheduled signed checkpoints; verify anchors to the latest automatically; edited file → `CHECKPOINT_INVALID` | `CheckpointTest` (8) | `9812903` |
+| No HMAC key rotation (SEC-07) | MACs stored as `keyId:hex`; retired keys verify only; constant-time compare | `keyRotationKeepsOldRecordsVerifiable`, `macMatchingRejectsUnknownKeysAndMalformedValues` | `38c7da9` |
+| PII plaintext at rest (SEC-07) | AES-256-GCM for sensitive fields; hashes over plaintext; reserved prefix refused | `EncryptionAtRestTest` (7) | `ef638a9` |
+| No OWASP dependency check; no TLS config (SEC-09) | Weekly dependency-check workflow (CVSS ≥ 7 fails); `tls` profile | `httpsResponsesCarryHsts` | `c00b17f` |
+| First-person lines in docs (ATT-05) | Rephrased neutrally | — | `fbe56bf` |
+
+Still open by choice (large effort): OIDC/mTLS instead of Basic, multi-instance scaling (shared rate
+limiter, Postgres), incremental verify, encryption-key rotation.
+
+| # | Decision | Alternatives rejected | Why |
+|---|---|---|---|
+| 32 | Ed25519 for bundles and checkpoints | HMAC (needs the secret to verify); RSA | Recipients verify with a public key; small fast signatures in the JDK |
+| 33 | Trusted-proxy list for `X-Forwarded-For` | Always trust the header; Tomcat `RemoteIpValve` | Always trusting lets clients dodge the limit; an explicit list is testable with MockMvc |
+| 34 | Store `keyId:hex` in the existing `mac` column | A separate key-id column | No schema change; the MAC is self-describing |
+| 35 | Encrypt only configured sensitive fields | Encrypt whole payloads | Non-sensitive fields stay queryable and readable in the DB; hashes stay over plaintext |
+| 36 | Checkpoint file instead of a DB table | Same database | A checkpoint in the same DB can be deleted by the same attacker; a separate WORM location can't |
+| 37 | Move the WAL privacy test to a non-encrypted field | Keep `accountNumber` | Once encrypted, `accountNumber` passed even without the WAL fix, so the test stopped proving anything (mutation-checked) |

@@ -5,32 +5,36 @@
 | Layer | What | Where |
 |---|---|---|
 | **Unit (pure)** | Hash chain, every violation type, edge-case payloads, malformed bundles | `chain/HashChainTest` (23) |
-| **Unit (store, filter)** | Clock stepping back, retention window and floor; chunked-body cut-off, log sanitizing | `store/AuditStoreTest` (4), `security/RequestGuardFilterTest` (3) |
-| **Integration (Spring + real SQLite + real auth)** | Every endpoint through MockMvc with HTTP Basic users on a real database file | `ScenarioAApiTest` (28), `RedactionTest` (8), `RetentionTest` (12), `ExportTest` (11), `ComplianceReportTest` (7) |
-| **Security** | Endpoint × role × outcome matrix, anonymous access, wrong passwords, spoofing, masking, headers, CSRF, fail-closed config | `SecurityTest` (48) |
-| **Adversarial integrity** | Raw SQL bypassing the API and triggers; full chain rewrite; tail truncation | `tamper(...)` in `ApiTestBase`, `IntegrityKeyTest` (7) |
+| **Unit (store, filter)** | Clock stepping back, retention window and floor, HMAC key rotation; chunked-body cut-off, trusted-proxy client IP, log sanitizing | `store/AuditStoreTest` (5), `security/RequestGuardFilterTest` (6) |
+| **Integration (Spring + real SQLite + real auth)** | Every endpoint through MockMvc with HTTP Basic users on a real database file | `ScenarioAApiTest` (28), `RedactionTest` (8), `RetentionTest` (12), `ExportTest` (15), `ComplianceReportTest` (7) |
+| **Security** | Endpoint × role × outcome matrix, anonymous access, wrong passwords, spoofing, masking, headers incl. HSTS, CSRF, versioned paths, fail-closed config | `SecurityTest` (50) |
+| **Adversarial integrity** | Raw SQL bypassing the API and triggers; full chain rewrite; tail truncation; key validation | `tamper(...)` in `ApiTestBase`, `IntegrityKeyTest` (9) |
+| **Checkpoints** | Signed checkpoints, automatic truncation detection, edited checkpoint file, no checkpoint of broken chains | `CheckpointTest` (8) |
+| **Encryption at rest** | No plaintext PII in raw DB files, plaintext via API, redaction, tampered ciphertext, wrong key | `EncryptionAtRestTest` (7) |
 | **Corrupt data** | Unreadable JSON, NULL columns, non-hex salts, un-archived tombstones → `CORRUPT_RECORD`, reads keep working | `CorruptRecordTest` (8) |
 | **Fault injection** | Insert failure mid-redaction / mid-archive rolls back; no lost seq; DB lock held by another process → 503 | `FaultInjectionTest` (4) |
 | **Abuse limits** | Body-size 413, rate limit 429 (also before auth), idempotent retries, concurrent duplicates | `RequestGuardTest` (5), `IdempotencyTest` (6) |
 | **Boundaries** | Last allowed value passes, one more fails (32 KB payload, 128-char ids, 64-char type, 50 fields, 500-char reason, page 500) | `BoundaryTest` (6) |
 | **Concurrency** | 80 writes from an 8-thread pool, then full verify; 16 concurrent retries with one key | `concurrentWritersNeverForkTheChain`, `concurrentRetriesWriteExactlyOnce` |
 
-**180 tests, 0 skipped, about 1 minute.** No mocks: tests use the real database, real Spring
+**207 tests, 0 skipped, about 1.5 minutes.** No mocks: tests use the real database, real Spring
 Security and real HTTP Basic. Tests assert the **exact violation and location** (`violation`,
 `firstInvalidSeq`), not only `valid == false`. Time-dependent behaviour (6-year retention, rate
 windows, clock corrections) runs on a movable `TestClock`, so the real legal floor is tested
 rather than switched off.
 
-Tests were checked to discriminate: removing the WAL checkpoint fails the privacy test, and
-verifying a rewritten chain without the key passes while the keyed verify fails it.
+Tests were checked to discriminate: removing the WAL checkpoint fails the privacy test (re-checked
+after encryption was added, using a non-encrypted field), verifying a rewritten chain without the
+key passes while the keyed verify fails it, and a bundle with a dropped record passes hash checks
+but fails the signature.
 
 ## Coverage (JaCoCo, enforced in `mvn verify`)
 
 | Counter | Covered | Gate |
 |---|---|---|
-| Line | **96.1%** | ≥ 90% |
-| Branch | **92.0%** | ≥ 85% |
-| Method | **97.5%** | — |
+| Line | **96.0%** | ≥ 90% |
+| Branch | **91.1%** | ≥ 85% |
+| Method | **98.0%** | — |
 
 Report: `target/site/jacoco/index.html` locally; the `reports` artifact of each CI run.
 Uncovered lines are mostly `AuditLogApplication.main` and defensive branches for JVM-guaranteed
@@ -43,7 +47,11 @@ algorithms (`NoSuchAlgorithmException` for SHA-256 / HmacSHA256).
 | Anonymous or wrong-role access to any endpoint | `SecurityTest` matrix (7 endpoints × 4 roles + anonymous) |
 | Forged attribution | `recordedByIsTheAuthenticatedUserAndCannotBeSpoofed`, `systemEventTypesCannotBeWrittenByCallers` |
 | Evidence destruction through retention | `windowBelowTheLegalMinimumIsRejected`, `verifyFlagsAnArchiveRunBelowTheFloor` |
-| DB admin rewrites or truncates the chain | `fullRewriteFoolsAPlainHashChainButNotTheMac`, `tailTruncationIsCaughtByAnExternalAnchor` |
+| DB admin rewrites or truncates the chain | `fullRewriteFoolsAPlainHashChainButNotTheMac`, `truncationAfterACheckpointIsCaughtByAPlainVerify` |
+| Records dropped from an export | `droppedRecordIsInvisibleToHashesButBreaksTheSignature` |
+| PII readable from the database file | `sensitiveValuesNeverReachTheDiskInPlaintext` |
+| Key rotation breaks old records | `keyRotationKeepsOldRecordsVerifiable` |
+| Rate limit evaded or shared behind a proxy | `clientsBehindATrustedProxyGetTheirOwnLimit`, `forwardedForFromAnUntrustedCallerIsIgnored` |
 | Corrupt row crashes verification | `CorruptRecordTest` |
 | Partial writes after a failure | `FaultInjectionTest` |
 
@@ -53,7 +61,7 @@ algorithms (`NoSuchAlgorithmException` for SHA-256 / HmacSHA256).
 |---|---|
 | Static analysis | `javac -Xlint:all -Werror` |
 | Bugs + security (SAST) | SpotBugs + FindSecBugs. Suppressions listed and justified in `spotbugs-exclude.xml` |
-| Dependencies (SCA) | Dependabot weekly updates (`.github/dependabot.yml`) |
+| Dependencies (SCA) | Dependabot weekly updates; OWASP dependency-check weekly (`security-scan.yml`, fails on CVSS ≥ 7) |
 | Tests + coverage | JUnit 5, AssertJ, Spring MockMvc, spring-security-test; JaCoCo gate |
 | Performance | `PerfBenchmarkTest` (opt-in, tag `perf`) |
 
@@ -76,4 +84,5 @@ Reproduce with `mvn test -Dtest=PerfBenchmarkTest -Dperf.excluded=none`.
 | Property-based fuzzing of canonical JSON | Would add a dependency (jqwik); parametrized cases cover key properties |
 | Cross-language verifier | Algorithm specified in `HashChain` and `02_ARCHITECTURE.md`; not built in a second language |
 | OAuth2 / OIDC tokens | HTTP Basic with bcrypt users is implemented and tested; tokens would replace only `SecurityConfig` |
-| Export completeness | A recipient can't prove no matching record was left out of a bundle (needs per-filter commitments) |
+| Real TLS handshake | The `tls` profile is configuration only; HSTS is tested with MockMvc `secure(true)`, not with a live certificate |
+| OWASP scan locally | Needs the NVD database download and an API key; runs weekly in CI instead of on every build |
