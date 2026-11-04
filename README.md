@@ -7,7 +7,7 @@ inserting, rewriting or truncating history in the data store is **detected** by
 report all work **without breaking the chain**. Every endpoint is behind Spring Security with
 role-based access.
 
-**Stack:** Java 17, Spring Boot 3.5, Spring Security, SQLite (JDBC); SHA-256, HMAC-SHA256, Ed25519 and
+**Stack:** Java 17, Spring Boot 4.1, Spring Security 7, SQLite (JDBC); SHA-256, HMAC-SHA256, Ed25519 and
 AES-256-GCM from the JDK.
 
 ## Quick start (local demo)

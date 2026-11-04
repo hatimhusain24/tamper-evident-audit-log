@@ -191,3 +191,16 @@ limiter, Postgres), incremental verify, encryption-key rotation.
 | 35 | Encrypt only configured sensitive fields | Encrypt whole payloads | Non-sensitive fields stay queryable and readable in the DB; hashes stay over plaintext |
 | 36 | Checkpoint file instead of a DB table | Same database | A checkpoint in the same DB can be deleted by the same attacker; a separate WORM location can't |
 | 37 | Move the WAL privacy test to a non-encrypted field | Keep `accountNumber` | Once encrypted, `accountNumber` passed even without the WAL fix, so the test stopped proving anything (mutation-checked) |
+
+### Dependency updates (Dependabot PRs #1-#7)
+
+All seven were tested on an integration branch and merged only with the full gate green
+(207 tests, coverage, SpotBugs).
+
+| PR | Update | Follow-up needed |
+|---|---|---|
+| #1, #4 | `actions/checkout` v7, `actions/setup-java` v6 | Adjacent-line conflict in `ci.yml` resolved; `security-scan.yml` aligned |
+| #2 | sqlite-jdbc 3.54.1.0 | None |
+| #3, #7 | FindSecBugs 1.14.0, SpotBugs plugin 4.10.5.0 | New `XSS_SERVLET` finding: the filter's error body is now serialized with Jackson instead of hand-built JSON |
+| #6, #5 | **Spring Boot 4.1.2**, springdoc 3.2.0 | `HttpStatus.PAYLOAD_TOO_LARGE` renamed `CONTENT_TOO_LARGE`; test starter `spring-boot-starter-webmvc-test` and the new `AutoConfigureMockMvc` package; null-safe role check (Spring Security 7 marks `getAuthority()` nullable). The jar was started and probed live |
+

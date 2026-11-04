@@ -48,8 +48,8 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
             HttpHeaders headers, HttpStatusCode status, WebRequest request) {
         for (Throwable t = ex; t != null; t = t.getCause()) {
             if (t instanceof RequestGuardFilter.BodyTooLarge) {
-                return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
-                        .body(ProblemDetail.forStatusAndDetail(HttpStatus.PAYLOAD_TOO_LARGE, t.getMessage()));
+                return ResponseEntity.status(HttpStatus.CONTENT_TOO_LARGE)
+                        .body(ProblemDetail.forStatusAndDetail(HttpStatus.CONTENT_TOO_LARGE, t.getMessage()));
             }
         }
         return super.handleHttpMessageNotReadable(ex, headers, status, request);

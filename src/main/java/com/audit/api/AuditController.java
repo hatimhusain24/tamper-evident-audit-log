@@ -85,7 +85,7 @@ public final class AuditController {
     /** READERs see sensitive payload fields masked; COMPLIANCE and ADMIN see them in full. */
     private Set<String> maskFor(Authentication auth) {
         boolean privileged = auth.getAuthorities().stream().anyMatch(a ->
-                a.getAuthority().equals("ROLE_COMPLIANCE") || a.getAuthority().equals("ROLE_ADMIN"));
+                "ROLE_COMPLIANCE".equals(a.getAuthority()) || "ROLE_ADMIN".equals(a.getAuthority()));   // null-safe
         return privileged ? Set.of() : sensitiveFields;
     }
 
