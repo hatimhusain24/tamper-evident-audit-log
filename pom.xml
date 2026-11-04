@@ -153,4 +153,31 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- Dependency vulnerability scan (SCA): mvn -P security-scan verify -DnvdApiKey=...
+             Fails on any dependency CVE with CVSS >= 7. Run weekly in CI (security-scan.yml). -->
+        <profile>
+            <id>security-scan</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.owasp</groupId>
+                        <artifactId>dependency-check-maven</artifactId>
+                        <version>12.1.0</version>
+                        <configuration>
+                            <failBuildOnCVSS>7</failBuildOnCVSS>
+                            <nvdApiKey>${nvdApiKey}</nvdApiKey>
+                            <formats>HTML,JSON</formats>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <goals><goal>check</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

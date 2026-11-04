@@ -179,6 +179,14 @@ class SecurityTest extends ApiTestBase {
     }
 
     @Test
+    void httpsResponsesCarryHsts() throws Exception {
+        var https = mvc.perform(MockMvcRequestBuilders.get("/actuator/health").secure(true)).andReturn().getResponse();
+        assertThat(https.getHeader("Strict-Transport-Security")).contains("max-age=");
+        var http = mvc.perform(MockMvcRequestBuilders.get("/actuator/health")).andReturn().getResponse();
+        assertThat(http.getHeader("Strict-Transport-Security")).isNull();         // only over TLS, per spec
+    }
+
+    @Test
     void securityHeadersArePresent() throws Exception {
         var response = mvc.perform(MockMvcRequestBuilders.get("/actuator/health")).andReturn().getResponse();
         assertThat(response.getHeader("X-Content-Type-Options")).isEqualTo("nosniff");
