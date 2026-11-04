@@ -52,8 +52,8 @@ public final class ChainVerifier {
             return false;
         }
         Violation v = HashChain.safeCheck(r, prev == null ? HashChain.GENESIS_HASH : prev.hash(), checked + 1);
-        if (v == null && key != null && !key.mac(r.hash()).equals(r.mac())) {
-            v = new Violation("MAC_MISMATCH", "record was not written by this service (bad or missing MAC)");
+        if (v == null && key != null && !key.matches(r.hash(), r.mac())) {
+            v = new Violation("MAC_MISMATCH", "record was not written by this service (bad, missing or unknown-key MAC)");
         }
         if (v == null && r.archived() && r.seq() != lastArchived + 1) {
             v = new Violation("UNAUTHORIZED_ARCHIVE", "tombstones must form a contiguous prefix of the chain");

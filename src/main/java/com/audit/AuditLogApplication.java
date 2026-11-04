@@ -1,6 +1,7 @@
 package com.audit;
 
 import com.audit.chain.BundleVerifierCli;
+import com.audit.chain.IntegrityKey;
 import com.audit.chain.SigningKey;
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
@@ -36,6 +37,14 @@ public class AuditLogApplication {
     @Bean
     Clock clock() {
         return Clock.systemUTC();
+    }
+
+    /** Fails startup when the current MAC key is missing or weak; retired keys only verify old records. */
+    @Bean
+    IntegrityKey integrityKey(@Value("${audit.hmac-key-id:k1}") String keyId,
+                              @Value("${audit.hmac-key:}") String key,
+                              @Value("${audit.hmac-retired-keys:}") String retired) {
+        return IntegrityKey.of(keyId, key, retired);
     }
 
     /** Fails startup when the Ed25519 key pair is missing or mismatched. */

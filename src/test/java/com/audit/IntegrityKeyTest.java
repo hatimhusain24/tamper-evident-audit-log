@@ -92,7 +92,24 @@ class IntegrityKeyTest extends ApiTestBase {
     void serviceRefusesAMissingOrShortKey() {
         assertThatThrownBy(() -> IntegrityKey.of(null)).hasMessageContaining("refuses to start");
         assertThatThrownBy(() -> IntegrityKey.of("too-short")).hasMessageContaining("at least 32 bytes");
-        assertThat(IntegrityKey.of("x".repeat(32)).mac("abc")).hasSize(64);
+        assertThat(IntegrityKey.of("x".repeat(32)).mac("abc")).startsWith("k1:").hasSize(67);
+        assertThatThrownBy(() -> IntegrityKey.of("bad id!", "x".repeat(32), "")).hasMessageContaining("key id");
+        assertThatThrownBy(() -> IntegrityKey.of("k2", "x".repeat(32), "k1=short")).hasMessageContaining("at least 32");
+        assertThatThrownBy(() -> IntegrityKey.of("k1", "x".repeat(32), "k1=" + "y".repeat(32))).hasMessageContaining("duplicate");
+        assertThatThrownBy(() -> IntegrityKey.of("k2", "x".repeat(32), "k1")).hasMessageContaining("at least 32");
+    }
+
+    @Test
+    void macMatchingRejectsUnknownKeysAndMalformedValues() {
+        IntegrityKey key = IntegrityKey.of("k2", "x".repeat(32), "k1=" + "y".repeat(32));
+        String old = IntegrityKey.of("k1", "y".repeat(32), "").mac("h");
+        assertThat(key.matches("h", old)).isTrue();
+        assertThat(key.matches("h", key.mac("h"))).isTrue();
+        assertThat(key.matches("h", "k9:" + "0".repeat(64))).isFalse();
+        assertThat(key.matches("h", "no-key-id")).isFalse();
+        assertThat(key.matches("h", null)).isFalse();
+        assertThat(key.matches(null, old)).isFalse();
+        assertThat(key.matches("other", old)).isFalse();
     }
 
     @Test

@@ -99,7 +99,7 @@ public final class AuditStore {
                 prev_hash     TEXT    NOT NULL,
                 hash          TEXT    NOT NULL,
                 archived      INTEGER NOT NULL DEFAULT 0,
-                mac           TEXT    NOT NULL   -- HMAC-SHA256(server key, hash)
+                mac           TEXT    NOT NULL   -- "keyId:" + HMAC-SHA256(server key, hash)
             )""",
             """
             CREATE TABLE IF NOT EXISTS idempotency_keys (
@@ -140,8 +140,8 @@ public final class AuditStore {
 
     public AuditStore(DataSource dataSource, Clock clock,
                       @Value("${audit.retention-min-days:2190}") double retentionMinDays,
-                      @Value("${audit.hmac-key:}") String hmacKey) {
-        this.key = IntegrityKey.of(hmacKey);   // refuses to start without a strong key
+                      IntegrityKey key) {
+        this.key = key;
         this.jdbc = new JdbcTemplate(dataSource);
         this.tx = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
         this.clock = clock;
