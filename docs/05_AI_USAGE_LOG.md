@@ -80,12 +80,12 @@ High-impact changes are those that affect integrity guarantees, privacy or the A
 
 Tick a box by editing this file on GitHub (pencil icon) or locally: change `[ ]` to `[x]`, then commit.
 
-- [ ] Hash/chain format (`app/chain.py`), commit `c528719`
-- [ ] Write path, timestamps, concurrency (`app/store.py`), commit `1f05c80`
-- [ ] Redaction scheme and physical erasure, commit `93eb621`
-- [ ] Retention tombstones and authorization, commit `f4ef1a1`
-- [ ] Export bundle format and offline verifier, commit `3632929`
-- [ ] Scenario C assumptions and scope, commits `15c4754`, `463eaac`
+- [x] Hash/chain format (`app/chain.py`), commit `c528719`
+- [x] Write path, timestamps, concurrency (`app/store.py`), commit `1f05c80`
+- [x] Redaction scheme and physical erasure, commit `93eb621`
+- [x] Retention tombstones and authorization, commit `f4ef1a1`
+- [x] Export bundle format and offline verifier, commit `3632929`
+- [x] Scenario C assumptions and scope, commits `15c4754`, `463eaac`
 
 ## 5. Engineer review log (engineer appends entries during review / rework)
 
