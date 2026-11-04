@@ -50,6 +50,7 @@ public class SecurityConfig {
         http
             .addFilterBefore(new RequestGuardFilter(maxRequestBytes, perMinute, clock, trustedProxies),
                     BasicAuthenticationFilter.class)
+            .addFilterAfter(new LogContextFilter(), BasicAuthenticationFilter.class)
             // Stateless JSON API: no sessions or cookies, and every POST must be application/json,
             // which a cross-site form cannot send (tested in SecurityTest).
             .csrf(csrf -> csrf.disable())
