@@ -164,11 +164,13 @@ public final class AuditController {
     /**
      * Walks the full chain: hashes, MACs and policies. Returns valid, first bad seq and violation
      * type, plus the head. Without explicit anchor parameters, the latest signed checkpoint is used
-     * as the anchor, so records removed from the end are detected automatically.
+     * as the anchor, so records removed from the end are detected automatically. mode=incremental
+     * checks only records after that checkpoint (fast); without a checkpoint it falls back to full.
      */
     @GetMapping("/audit/verify")
     public VerifyResult verify(@RequestParam(required = false) @Min(1) Long anchorSeq,
-                               @RequestParam(required = false) @Pattern(regexp = "^[0-9a-f]{64}$") String anchorHash) {
+                               @RequestParam(required = false) @Pattern(regexp = "^[0-9a-f]{64}$") String anchorHash,
+                               @RequestParam(defaultValue = "full") @Pattern(regexp = "full|incremental") String mode) {
         if ((anchorSeq == null) != (anchorHash == null)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "give both anchorSeq and anchorHash, or neither");
         }
@@ -177,6 +179,8 @@ public final class AuditController {
         if (checkpoint.isPresent() && !checkpoints.isAuthentic(checkpoint.get())) {
             result = new VerifyResult(false, 0, 0, null, null, "CHECKPOINT_INVALID",
                     "the latest checkpoint's signature does not verify (checkpoint file was altered)");
+        } else if (checkpoint.isPresent() && "incremental".equals(mode)) {
+            result = store.verifyFrom(checkpoint.get().seq(), checkpoint.get().hash());   // only newer records
         } else if (checkpoint.isPresent()) {
             result = store.verify(checkpoint.get().seq(), checkpoint.get().hash());
         } else {

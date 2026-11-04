@@ -57,13 +57,22 @@ public class CheckpointService {
         this.file = Path.of(file);
     }
 
-    /** Write a checkpoint if the head moved since the last one; returns the latest checkpoint. */
+    /**
+     * Write a checkpoint if the head moved since the last one; returns the latest checkpoint.
+     * Empty when the log is empty or fails full verification: a broken chain is never signed and
+     * an old checkpoint is not returned as if all were well.
+     */
     @Scheduled(initialDelayString = "${audit.checkpoint.interval-ms:3600000}",
                fixedDelayString = "${audit.checkpoint.interval-ms:3600000}")
     public synchronized Optional<Checkpoint> checkpoint() {
         VerifyResult head = store.verify(null, null);
-        if (!head.valid() || head.headSeq() == 0) {
-            return latest();   // never sign a broken or empty chain
+        if (!head.valid()) {
+            SECURITY_LOG.error("checkpoint refused: chain fails verification violation={} seq={}",
+                    head.violation(), head.firstInvalidSeq());
+            return Optional.empty();
+        }
+        if (head.headSeq() == 0) {
+            return Optional.empty();
         }
         Optional<Checkpoint> last = latest();
         if (last.isPresent() && last.get().seq() == head.headSeq()) {

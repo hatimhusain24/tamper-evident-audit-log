@@ -46,6 +46,20 @@ public final class ChainVerifier {
         this.anchorHash = anchorHash;
     }
 
+    /**
+     * Incremental mode: continue from a record already proven good (a signed checkpoint) instead
+     * of from genesis, so only newer records are walked.
+     */
+    public ChainVerifier resumeFrom(AuditRecord anchor) {
+        prev = anchor;
+        checked = anchor.seq();
+        if (anchor.archived()) {
+            lastArchived = anchor.seq();
+            archivedThrough = anchor.seq();
+        }
+        return this;
+    }
+
     /** Returns false once a violation is found (the caller can stop reading). */
     public boolean accept(AuditRecord r) {
         if (failure != null) {

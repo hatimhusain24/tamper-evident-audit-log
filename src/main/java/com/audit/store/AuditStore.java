@@ -387,6 +387,23 @@ public final class AuditStore {
         return verify(null, null);
     }
 
+    /**
+     * Incremental verification from a trusted (signed) checkpoint: the record at the checkpoint
+     * must still have the signed hash and a valid MAC, then only newer records are walked. Older
+     * records are covered by the full verification that runs before every checkpoint.
+     */
+    public VerifyResult verifyFrom(long checkpointSeq, String checkpointHash) {
+        List<AuditRecord> anchor = jdbc.query(SELECT + " WHERE seq = ?", (rs, i) -> toRecord(rs), checkpointSeq);
+        if (anchor.isEmpty() || !MessageDigest.isEqual(anchor.get(0).hash().getBytes(StandardCharsets.UTF_8),
+                checkpointHash.getBytes(StandardCharsets.UTF_8)) || !key.matches(checkpointHash, anchor.get(0).mac())) {
+            return new VerifyResult(false, 0, 0, null, checkpointSeq, "ANCHOR_MISMATCH",
+                    "the checkpointed record is missing or changed");
+        }
+        ChainVerifier verifier = new ChainVerifier(retentionMinDays, key, null, null).resumeFrom(anchor.get(0));
+        streamChain(checkpointSeq + 1, verifier::accept);
+        return verifier.result();
+    }
+
     /** Full verification: hashes, MACs, retention policy and (optionally) an external anchor. */
     public VerifyResult verify(Long anchorSeq, String anchorHash) {
         ChainVerifier verifier = new ChainVerifier(retentionMinDays, key, anchorSeq, anchorHash);
