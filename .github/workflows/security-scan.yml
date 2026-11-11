@@ -15,7 +15,7 @@ jobs:
         run: mvn -B -P security-scan verify -DskipTests -Djacoco.skip=true -DnvdApiKey=${{ secrets.NVD_API_KEY }}
       - name: Publish report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dependency-check-report
           path: target/dependency-check-report.*
